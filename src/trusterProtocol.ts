@@ -1,4 +1,8 @@
+
+
 /** Bit-set of the STAT system status registers (Address = 0x9008) **/
+import {crc16, crc16modbus} from "crc";
+
 export enum STAT {
     /**
      * Drive source ON
@@ -139,9 +143,19 @@ export enum DSSE {
 
 }
 
+export function enumBitSetFromNumber(bitset: number, allValues: any): ReadonlySet<number> {
+    const flags = new Set<number>();
+    Object.keys(allValues).forEach(v => {
+        const vNum = Number(v);
+        if (!isNaN(vNum) && ((bitset & vNum) === vNum)) {
+            flags.add(vNum);
+        }
+    });
+    return flags;
+}
 
-export function enumBitSetFromNumber(bitset: number, allValues: any): Set<string> {
-    return new Set((Object.keys(allValues)).filter(v => (bitset & allValues[v]) == allValues[v]))
+function enumNumberToString(allValues: any): ((n:number) => string)  {
+    return (index) => allValues[index.toString()];
 }
 
 
@@ -149,22 +163,6 @@ export function enumBitSetFromNumber(bitset: number, allValues: any): Set<string
  *  device status register 2 (0x9005)
  */
 export enum DSS1 {
-    /**
-     * Load cell calibration status
-     * 0: Calibration not yet complete
-     * 1: Calibration complete
-     * Regardless of whether or not a load cell calibration command has been issued, this bit is 1 as
-     * long as a calibration has completed in the past.
-     */
-    CLBS = 1 << 1,
-
-    /**
-     * Load cell calibration complete
-     * 0: Calibration not yet complete
-     * 1: Calibration complete
-     * This bit turns 1 when the load cell calibration command (CLBR) has been successfully executed.
-     */
-    CEND = 1 << 2,
 
     /**
      * Position complete status
@@ -196,7 +194,7 @@ export enum DSS1 {
      * monitored (set the switch to AUTO in case of RC controllers with a mode toggle switch). If
      * Modbus is enabled, the Pause Commands (5.4.6 or 6.5.6) are monitored.
      */
-    STP = 1 << 4,
+    STP = 1 << 5,
 
     /**
      * Brake forced-release status
@@ -362,8 +360,22 @@ export enum DSS2 {
     ENBS = 1 << 15,
 }
 
+export enum FunctionCode {
+    ReadCoilStatus = 0x01,
+    ReadInputStatus = 0x02,
+    ReadHoldingRegisters = 0x03,
+    ReadInputRegisters = 0x04,
+    ForceSingleCoil = 0x05,
+    PresetSingleRegister = 0x06,
+    ReadExceptionStatus = 0x07,
+    ForceMultipleCoils = 0x0F,
+    PresetMultipleRegisters = 0x10,
+    ReportSlaveId = 0x11,
+    ReadWriteRegister = 0x17
+}
+
 export function calculateLRC(cmd: string): string {
-    if (cmd.length % 2 != 0) {
+    if (cmd.length % 2 !== 0) {
         throw new Error("Unexpected command length!")
     }
     let sum: number = 0;
@@ -371,11 +383,11 @@ export function calculateLRC(cmd: string): string {
         sum += parseInt(cmd.substr(i, 2), 16);
     }
     const complement = ~sum + 1 >>> 0;
-    return complement.toString(16).slice(-2);
+    return complement.toString(16).slice(-2).toUpperCase();
 }
 
 export function buildCommand(rawCmd: string): string {
-    return `:${rawCmd}${calculateLRC(rawCmd)}"\r\n"`;
+    return `:${rawCmd}${calculateLRC(rawCmd)}\r\n`;
 }
 
 
@@ -386,27 +398,143 @@ export function queryStatusRegister(): string {
     return buildCommand("01039000000A")
 }
 
+export function queryStatusRegisterRtu(): ArrayBuffer {
+    const buffer = new ArrayBuffer(8);
+    writeHeader(FunctionCode.ReadHoldingRegisters, buffer);
+    const v = new DataView(buffer);
+    v.setUint16(2, 0x9000);
+    v.setUint16(4, 0x000A);
+    v.setUint16(6, crc16modbus(Buffer.from(buffer,0,6)), true);
+    return buffer;
+}
+
 
 /**
- * Direct writing of positioning Data Target position coordinate specification register PCMD 9900 Register size 2 Byte size 4 chars (Unit 0.01 mm)
+ * ALRS
+ * When the alarm reset edge is turned on (the data is first set to FF00H and then changed to 0000H),
+ * alarms will be reset.
+ * Requires both commands to be sent.
+ */
+export function resetAlarm(): [string, string] {
+    return [":01050407FF00F0\r\n", ":010504070000EF\r\n"];
+}
+
+/**
+ * Brake Forced Release BKRL
+ *
+ */
+export function forceReleaseBreak(release:boolean): string
+{
+    return buildCommand(`01050408${release? 'FF00' : '0000'}`);
+}
+
+
+/**
+ * Direct writing of positioning Data Target position coordinate specification register PCMD 9900 Register size 2 register 4 bytes (Unit 0.01 mm)
  */
 export function positionCommand(targetPosition: number): string {
-    const targetPositionString = targetPosition.toString(16).slice(4);
-    let cmd = `011099000002040000${targetPositionString}`;
+    const targetPositionString = encodeNumber(targetPosition,4);
+    let cmd = `01109900000204${targetPositionString}`;
     return buildCommand(cmd);
 }
+
+export function positionCommandRtu(targetPosition: number): ArrayBuffer {
+    const buffer = new ArrayBuffer(13);
+    writeHeader(FunctionCode.PresetMultipleRegisters,buffer)
+    const v = new DataView(buffer);
+    v.setInt16(2, 0x9900) //target position specification register
+    v.setInt16(4, 0x0002) // register count
+    v.setInt8(6, 0x04) // byteCount
+    v.setInt32(7, targetPosition) // unsigned might be used for relative offsets
+    v.setUint16(11, crc16modbus(Buffer.from(buffer, 0, 11) as Buffer), true)
+    return buffer;
+}
+
+function writeHeader(functionCode: number, buffer: ArrayBuffer) {
+    const v = new DataView(buffer);
+    v.setInt8(0, 0x01);
+    v.setInt8(1, functionCode);
+}
+
 
 
 /**
  * Positioning Data Direct Writing (Queries Using Code 10))
- * VCMD Speed specification register (2 byte in 0.01 mm/sec) Writing 3 registers, 2 bytes
+ * VCMD Speed specification register (2 byte in 0.01 mm/sec) Writing 3 registers, 2 bytes each
  * ACMD Acceleration/deceleration specification register (1 byte in 0.01 G)
  */
 export function velocityAndAccelerationCommand(velocity: number, acceleration: number): string {
-    const velocityStr = velocity.toString(16).slice(4);
-    const accelerationStr = acceleration.toString(16).slice(2);
+    const velocityStr = encodeNumber(velocity, 4)
+    const accelerationStr = encodeNumber(acceleration, 2);
     return buildCommand(`01109904000306${velocityStr}${accelerationStr}`);
 }
+
+function encodeNumber(n: number, bytes:number): string {
+    return n.toString(16).toUpperCase().padStart(bytes*2, "0").slice(- (bytes*2))
+}
+
+/**
+ * Positioning Data Direct Writing (Queries Using Code 10))
+ * VCMD Speed specification register (2 byte in 0.01 mm/sec) Writing 3 registers, each 2 bytes
+ * ACMD Acceleration/deceleration specification register (1 byte in 0.01 G)
+ * @param targetPosition target position in mm/100
+ * @param targetPositionBand in mm/100 (default is 0.1 mm)
+ * @param velocity in mm/100 (good value is 10 000)
+ * @param acceleration in g/100 (good value is 30)
+ */
+export function positionVelocityAndAccelerationCommand(targetPosition: number, velocity: number, acceleration: number, targetPositionBand:number = 10): string {
+    const targetPositionStr = encodeNumber(targetPosition, 4);
+    const targetPositionBandStr = encodeNumber(targetPositionBand, 4);
+    const velocityStr = encodeNumber(velocity, 4);
+    const accelerationStr = encodeNumber(acceleration, 2);
+    return buildCommand(`0110990000070E${targetPositionStr}${targetPositionBandStr}${velocityStr}${accelerationStr}`);
+}
+
+export function positionVelocityAndAccelerationCommandRtu(targetPosition: number, velocity: number, acceleration: number, targetPositionBand:number = 10): ArrayBuffer {
+    const buffer = new ArrayBuffer(23);
+    writeHeader(FunctionCode.PresetMultipleRegisters, buffer)
+    const v = new DataView(buffer);
+    v.setInt16(2, 0x9900) //target position specification register
+    v.setInt16(4, 0x0007) // register count
+    v.setInt8(6, 0x0E) // byteCount
+    v.setInt32(7, targetPosition) // unsigned might be used for relative offsets
+    v.setUint32(11, targetPositionBand)
+    v.setUint32(15, velocity)
+    v.setUint16(19, acceleration)
+    v.setUint16(21, crc16modbus(Buffer.from(buffer, 0 , 21)), true)
+    return buffer;
+}
+
+
+/**
+ * Set Push-current limiting value (PPOW)
+ * Set the current limit during push-motion operation in PPOW. Set an appropriate value by referring to the table below.
+ * Pushable range: 20 to 70(%) of 255
+ */
+export function foo() {
+ // TODO
+}
+
+/**
+ * Parses a response if it is an exception.
+ */
+export function parseException(response: string) : { exceptionCode: number, exceptionMessage: string } {
+    lrcCheck(response);
+    if (!response.charAt(3)) {
+        throw new Error("Response is not an exception (Function Code MSB is not set to 1).")
+    }
+
+    const exceptionCode = parseInt(response.slice(5,7), 16);
+    const exceptionMessage = exceptionMap[exceptionCode-1] || 'Unknown Exception Code';
+    return { exceptionCode, exceptionMessage }
+}
+
+const exceptionMap = [
+    'Illegal Function',
+    'Illegal Data Address',
+    'Illegal Data Value',
+    'Slave Device Failure'
+];
 
 /**
  * DSS1 Controller Status Signal Reading 1 (reading two registers DSS1 and DSS2 ?)
@@ -416,22 +544,33 @@ export function queryDeviceStatusCommand(): string {
 }
 
 export function parseDeviceStatusResponse(response: string): { dss1: Set<DSS1>, dss2: Set<DSS2> } {
+    lrcCheck(response);
     // Data of Register Read (03) starts at character 7
-    const dss1Hex = response.slice(7, 4)
-    const dss2Hex = response.slice(11, 4)
+    const dss1Hex = response.slice(7, 11)
+    const dss2Hex = response.slice(11, 15)
     const dss1 = enumBitSetFromNumber(parseInt(dss1Hex, 16), DSS1) as any as Set<DSS1>;
     const dss2 = enumBitSetFromNumber(parseInt(dss2Hex, 16), DSS2) as any as Set<DSS2>;
 
+    console.info(`Parsed parseDeviceStatusResponse from response: ${response} dss1: ${Array.from(dss1)} (${Array.from(dss1).map(enumNumberToString(DSS1))})  dss2:${Array.from(dss2).map(enumNumberToString(DSS2))}`)
+    
     return {dss1, dss2}
 }
 
 /**
  * Queries: TODO: check if shockspot hardware supports this at all
  * - Total moving count (TLMC) 2Registers, 4bytes
- * - Total moving distance (ODOM) 2Registers, 4bytes (unit of 1m or mm?)
+ * - Total moving distance (ODOM) 2Registers, 4bytes (unit of 1m)
  */
 export function queryDeviceMovementHistory(): string {
     return buildCommand("010384000004")
+}
+
+export function parseDeviceMovementHistory(response: string): {totalMovingCount: number, totalMovingDistance: number} {
+    lrcCheck(response);
+    // Data of Register Read (03) starts at character 7
+    const tlmcHex = response.slice(7, 15);
+    const odomHex = response.slice(15, 23);
+    return { totalMovingCount: parseInt(tlmcHex, 16), totalMovingDistance: parseInt(odomHex, 16)}
 }
 
 /**
@@ -453,8 +592,32 @@ export function decelerationStopCommand(): string {
 /**
  * Register reading DIPM Input port query  Input port monitor register (9003), 2 registers,
  * Used to determine if the hand switch is pressed.
+ * TODO: Why are two registers read?
  */
 export function queryInputSignalStatus(): string {
     return buildCommand("010390030002");
 }
+
+function lrcCheck(response :string) : void {
+    if (!response.startsWith(":")) {
+        throw new Error("Expected response to begin with :");
+    }
+    if (response.length < 4) {
+        throw new Error("Reponse must be at least 4 characters long.");
+    }
+    const data = response.slice(1,-2);
+    const presendedLrc = response.slice(-2);
+    const expectedLrc = calculateLRC(data)
+    if (expectedLrc !== presendedLrc) {
+        throw new Error(`LRC mismatch. Expected: ${expectedLrc} but received: ${presendedLrc})`);
+    }
+}
+
+export function parseInputSignalStatusResponse(response: string): { inputStatus: number } {
+    lrcCheck(response);
+    // Data of Register Read (03) starts at character 7
+    const dataHex = response.slice(7, 11);
+    return { inputStatus: parseInt(dataHex, 16) }
+}
+
 

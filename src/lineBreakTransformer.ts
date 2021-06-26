@@ -6,6 +6,10 @@ export class LineBreakTransformer {
 
     private container?: any = '';
 
+    reset() {
+        this.container = ''
+    }
+
     transform(chunk: any, controller: any) {
         this.container += chunk;
         const lines: string[] = this.container.split('\r\n');
