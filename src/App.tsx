@@ -18,6 +18,10 @@ function App() {
           <button onClick={()=>thruster?.home()}   > Home!!</button>
         </div>
 
+        <p>
+          Find the code on <a href="https://github.com/rezreal/knock-lot">github.com/rezreal/knock-lot</a>.
+        </p>
+
       </header>
     </div>
   );
