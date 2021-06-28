@@ -2,10 +2,9 @@ import {LineBreakTransformer} from "./lineBreakTransformer";
 import * as ThrusterProtocol from "./trusterProtocol";
 import {
     DSS1,
-    DSS2, positionCommand,
-    positionVelocityAndAccelerationCommand,
+    DSS2, positionVelocityAndAccelerationCommand,
     queryDeviceStatusCommand,
-    resetAlarm, velocityAndAccelerationCommand
+    resetAlarm
 } from "./trusterProtocol";
 
 export class Thruster {

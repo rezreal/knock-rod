@@ -1,33 +1,37 @@
 name: CI
-on: [push]
+on:
+  push:
+    branches:
+      - master
+
 jobs:
   build:
-    name: Build, lint, and test on Node ${{ matrix.node }} and ${{ matrix.os }}
-
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        node: ['10.x', '12.x', '14.x']
-        #os: [ubuntu-latest, windows-latest, macOS-latest]
-        os: [ubuntu-latest]
-
+    name: Build, lint, and ghpagedeploymeh
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v2
 
-      - name: Use Node ${{ matrix.node }}
+      - name: Use Node.js 12.x
         uses: actions/setup-node@v1
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 12.x
 
       - name: Install deps and build (with cache)
         uses: bahmutov/npm-install@v1
-
-      - name: Lint
-        run: yarn lint
 
       - name: Test
         run: yarn test --ci --coverage --maxWorkers=2
 
       - name: Build
         run: yarn build
+        env:
+          PUBLIC_URL: "https://rezreal.github.io/knock-lot/"
+
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@releases/v3
+        with:
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          BRANCH: gh-pages # The branch the action should deploy to.
+          FOLDER: build # The folder the action should deploy.
+          SINGLE_COMMIT: true

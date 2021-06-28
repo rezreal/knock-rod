@@ -1,7 +1,7 @@
 
 
 /** Bit-set of the STAT system status registers (Address = 0x9008) **/
-import {crc16, crc16modbus} from "crc";
+import {crc16modbus} from "crc";
 
 export enum STAT {
     /**
