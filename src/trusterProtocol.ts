@@ -1,5 +1,3 @@
-
-
 /** Bit-set of the STAT system status registers (Address = 0x9008) **/
 import {crc16modbus} from "crc";
 
@@ -143,6 +141,53 @@ export enum DSSE {
 
 }
 
+/**
+ * Control Flag Specification Register (CTLF) bit set
+ */
+enum CTLF {
+
+    /**
+     * 0: Normal operation (default)
+     * 1: Push-motion operation
+     */
+    PUSH = 1 << 1,
+    /**
+     * 0: The direction of push-motion operation after completion of approach is defined as the forward direction (default).
+     * 1: The direction of push-motion operation after completion of approach is defined as the reverse direction
+     *
+     * This bit is used to calculate the direction of final stop position from PCMD. If this bit is
+     * set incorrectly, therefore, the target position will deviate from the specified position by a
+     * distance corresponding to “2 × INP, ” as shown in Fig. 5.3 below.
+     * If bit 1 is set to 0, the setting of this bit is invalid.
+     */
+    DIR = 1 << 2,
+    /**
+     * 0: Normal operation (default)
+     * 1: Incremental operation (pitch feed)
+     * Setting this bit to 1 will enable the actuator to operate relative to the current position.
+     * In this operation, the actuator behaves differently between normal operation and pushmotion operation (CTLF bit 1).
+     * While the travel is calculated with respect to the target position (PCMD) in normal operation,
+     * it is calculated relative to the current position in push-motion operation (when bit 1 = 1).
+     */
+    INC = 1 << 3,
+
+    /**
+     * Bit 6 (MOD0), 7 (MOD1)
+     * Refer to the table below. These bits cannot be set on PCON-* andERC2 controllers.)
+     * @example
+     * MOD1 MOD0 Function
+     * 0    0    Trapezoid pattern (default)
+     * 0    1    S-motion
+     * 1    0    Primary delay filter
+     * 1    1    Cannot be used.
+     */
+    MOD0 = 1 << 6,
+    /**
+     * See MOD0.
+     */
+    MOD1 = 1 << 7,
+}
+
 export function enumBitSetFromNumber(bitset: number, allValues: any): ReadonlySet<number> {
     const flags = new Set<number>();
     Object.keys(allValues).forEach(v => {
@@ -154,7 +199,7 @@ export function enumBitSetFromNumber(bitset: number, allValues: any): ReadonlySe
     return flags;
 }
 
-function enumNumberToString(allValues: any): ((n:number) => string)  {
+function enumNumberToString(allValues: any): ((n: number) => string) {
     return (index) => allValues[index.toString()];
 }
 
@@ -404,7 +449,7 @@ export function queryStatusRegisterRtu(): ArrayBuffer {
     const v = new DataView(buffer);
     v.setUint16(2, 0x9000);
     v.setUint16(4, 0x000A);
-    v.setUint16(6, crc16modbus(Buffer.from(buffer,0,6)), true);
+    v.setUint16(6, crc16modbus(Buffer.from(buffer, 0, 6)), true);
     return buffer;
 }
 
@@ -423,9 +468,8 @@ export function resetAlarm(): [string, string] {
  * Brake Forced Release BKRL
  *
  */
-export function forceReleaseBreak(release:boolean): string
-{
-    return buildCommand(`01050408${release? 'FF00' : '0000'}`);
+export function forceReleaseBreak(release: boolean): string {
+    return buildCommand(`01050408${release ? 'FF00' : '0000'}`);
 }
 
 
@@ -433,14 +477,14 @@ export function forceReleaseBreak(release:boolean): string
  * Direct writing of positioning Data Target position coordinate specification register PCMD 9900 Register size 2 register 4 bytes (Unit 0.01 mm)
  */
 export function positionCommand(targetPosition: number): string {
-    const targetPositionString = encodeNumber(targetPosition,4);
+    const targetPositionString = encodeNumber(targetPosition, 4);
     let cmd = `01109900000204${targetPositionString}`;
     return buildCommand(cmd);
 }
 
 export function positionCommandRtu(targetPosition: number): ArrayBuffer {
     const buffer = new ArrayBuffer(13);
-    writeHeader(FunctionCode.PresetMultipleRegisters,buffer)
+    writeHeader(FunctionCode.PresetMultipleRegisters, buffer)
     const v = new DataView(buffer);
     v.setInt16(2, 0x9900) //target position specification register
     v.setInt16(4, 0x0002) // register count
@@ -456,8 +500,6 @@ function writeHeader(functionCode: number, buffer: ArrayBuffer) {
     v.setInt8(1, functionCode);
 }
 
-
-
 /**
  * Positioning Data Direct Writing (Queries Using Code 10))
  * VCMD Speed specification register (2 byte in 0.01 mm/sec) Writing 3 registers, 2 bytes each
@@ -469,8 +511,8 @@ export function velocityAndAccelerationCommand(velocity: number, acceleration: n
     return buildCommand(`01109904000306${velocityStr}${accelerationStr}`);
 }
 
-function encodeNumber(n: number, bytes:number): string {
-    return n.toString(16).toUpperCase().padStart(bytes*2, "0").slice(- (bytes*2))
+function encodeNumber(n: number, bytes: number): string {
+    return n.toString(16).toUpperCase().padStart(bytes * 2, "0").slice(-(bytes * 2))
 }
 
 /**
@@ -480,9 +522,9 @@ function encodeNumber(n: number, bytes:number): string {
  * @param targetPosition target position in mm/100
  * @param targetPositionBand in mm/100 (default is 0.1 mm)
  * @param velocity in mm/100 (good value is 10 000)
- * @param acceleration in g/100 (good value is 30)
+ * @param acceleration in g/100 (valid is [1, 300], good value is 30)
  */
-export function positionVelocityAndAccelerationCommand(targetPosition: number, velocity: number, acceleration: number, targetPositionBand:number = 10): string {
+export function positionVelocityAndAccelerationCommand(targetPosition: number, velocity: number, acceleration: number, targetPositionBand: number = 10): string {
     const targetPositionStr = encodeNumber(targetPosition, 4);
     const targetPositionBandStr = encodeNumber(targetPositionBand, 4);
     const velocityStr = encodeNumber(velocity, 4);
@@ -490,7 +532,7 @@ export function positionVelocityAndAccelerationCommand(targetPosition: number, v
     return buildCommand(`0110990000070E${targetPositionStr}${targetPositionBandStr}${velocityStr}${accelerationStr}`);
 }
 
-export function positionVelocityAndAccelerationCommandRtu(targetPosition: number, velocity: number, acceleration: number, targetPositionBand:number = 10): ArrayBuffer {
+export function positionVelocityAndAccelerationCommandRtu(targetPosition: number, velocity: number, acceleration: number, targetPositionBand: number = 10): ArrayBuffer {
     const buffer = new ArrayBuffer(23);
     writeHeader(FunctionCode.PresetMultipleRegisters, buffer)
     const v = new DataView(buffer);
@@ -501,10 +543,9 @@ export function positionVelocityAndAccelerationCommandRtu(targetPosition: number
     v.setUint32(11, targetPositionBand)
     v.setUint32(15, velocity)
     v.setUint16(19, acceleration)
-    v.setUint16(21, crc16modbus(Buffer.from(buffer, 0 , 21)), true)
+    v.setUint16(21, crc16modbus(Buffer.from(buffer, 0, 21)), true)
     return buffer;
 }
-
 
 /**
  * Set Push-current limiting value (PPOW)
@@ -512,21 +553,21 @@ export function positionVelocityAndAccelerationCommandRtu(targetPosition: number
  * Pushable range: 20 to 70(%) of 255
  */
 export function foo() {
- // TODO
+    // TODO
 }
 
 /**
  * Parses a response if it is an exception.
  */
-export function parseException(response: string) : { exceptionCode: number, exceptionMessage: string } {
+export function parseException(response: string): { exceptionCode: number, exceptionMessage: string } {
     lrcCheck(response);
     if (!response.charAt(3)) {
         throw new Error("Response is not an exception (Function Code MSB is not set to 1).")
     }
 
-    const exceptionCode = parseInt(response.slice(5,7), 16);
-    const exceptionMessage = exceptionMap[exceptionCode-1] || 'Unknown Exception Code';
-    return { exceptionCode, exceptionMessage }
+    const exceptionCode = parseInt(response.slice(5, 7), 16);
+    const exceptionMessage = exceptionMap[exceptionCode - 1] || 'Unknown Exception Code';
+    return {exceptionCode, exceptionMessage}
 }
 
 const exceptionMap = [
@@ -552,7 +593,7 @@ export function parseDeviceStatusResponse(response: string): { dss1: Set<DSS1>, 
     const dss2 = enumBitSetFromNumber(parseInt(dss2Hex, 16), DSS2) as any as Set<DSS2>;
 
     console.info(`Parsed parseDeviceStatusResponse from response: ${response} dss1: ${Array.from(dss1)} (${Array.from(dss1).map(enumNumberToString(DSS1))})  dss2:${Array.from(dss2).map(enumNumberToString(DSS2))}`)
-    
+
     return {dss1, dss2}
 }
 
@@ -565,12 +606,12 @@ export function queryDeviceMovementHistory(): string {
     return buildCommand("010384000004")
 }
 
-export function parseDeviceMovementHistory(response: string): {totalMovingCount: number, totalMovingDistance: number} {
+export function parseDeviceMovementHistory(response: string): { totalMovingCount: number, totalMovingDistance: number } {
     lrcCheck(response);
     // Data of Register Read (03) starts at character 7
     const tlmcHex = response.slice(7, 15);
     const odomHex = response.slice(15, 23);
-    return { totalMovingCount: parseInt(tlmcHex, 16), totalMovingDistance: parseInt(odomHex, 16)}
+    return {totalMovingCount: parseInt(tlmcHex, 16), totalMovingDistance: parseInt(odomHex, 16)}
 }
 
 /**
@@ -598,14 +639,14 @@ export function queryInputSignalStatus(): string {
     return buildCommand("010390030002");
 }
 
-function lrcCheck(response :string) : void {
+function lrcCheck(response: string): void {
     if (!response.startsWith(":")) {
         throw new Error("Expected response to begin with :");
     }
     if (response.length < 4) {
         throw new Error("Reponse must be at least 4 characters long.");
     }
-    const data = response.slice(1,-2);
+    const data = response.slice(1, -2);
     const presendedLrc = response.slice(-2);
     const expectedLrc = calculateLRC(data)
     if (expectedLrc !== presendedLrc) {
@@ -617,7 +658,7 @@ export function parseInputSignalStatusResponse(response: string): { inputStatus:
     lrcCheck(response);
     // Data of Register Read (03) starts at character 7
     const dataHex = response.slice(7, 11);
-    return { inputStatus: parseInt(dataHex, 16) }
+    return {inputStatus: parseInt(dataHex, 16)}
 }
 
 
