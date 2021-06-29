@@ -1,10 +1,13 @@
-import {LineBreakTransformer} from "./lineBreakTransformer";
-import * as ThrusterProtocol from "./trusterProtocol";
 import {
     DSS1,
-    DSS2, positionVelocityAndAccelerationCommand,
+    DSS2,
+    homeReturn,
+    parseDeviceStatusResponse,
+    pioModbusOnCommand,
+    positionVelocityAndAccelerationCommand,
     queryDeviceStatusCommand,
-    resetAlarm
+    resetAlarm,
+    servoOnCommand
 } from "./trusterProtocol";
 
 export class Thruster {
@@ -24,80 +27,79 @@ export class Thruster {
 
 
     public async move(): Promise<void> {
-        await this.write(positionVelocityAndAccelerationCommand(Math.round(Math.random() * 18000), Math.round(10000 + Math.random() * 20000), Math.round(Math.random() * 30 + 1), 10))
+        await this.write(positionVelocityAndAccelerationCommand(Math.round(Math.random() * 18000), Math.round(10000 + Math.random() * 20000), Math.round(Math.random() * 30 + 1), 10));
     }
 
     public async home(): Promise<void> {
-        await this.write(":0105040B0000EB\r\n"); // HOME Home Return Start (0000)
-        console.info("response: " + await this.readOnce());
+
+        await this.write(homeReturn[0]);
+        console.info("response: " + Thruster.toHex(await this.readOnce()));
         await this.wait(10);
-        await this.write(":0105040BFF00EC\r\n"); // HOME Home Return End (FF00)
-        console.info("response: " + await this.readOnce());
-
+        await this.write(homeReturn[1]);
+        console.info("response: " + Thruster.toHex(await this.readOnce()));
         await this.wait(200);
-
-        await this.write(queryDeviceStatusCommand());
-        console.info("status: " + await this.readOnce());
-
     }
 
-    private readonly encoder = new TextEncoder();
     private writer: WritableStreamDefaultWriter<Uint8Array> | undefined = undefined;
-    private reader: ReadableStreamDefaultReader<string> | undefined = undefined;
-    private flushableTransformer: LineBreakTransformer | undefined = undefined;
+    private reader: ReadableStreamDefaultReader<Uint8Array> | undefined = undefined;
 
 
     public async init(): Promise<void> {
         await this.port.open(Thruster.SERIAL_OPTIONS);
         this.writer = this.port.writable!.getWriter();
-        this.flushableTransformer = new LineBreakTransformer();
         this.reader = this.port.readable!
-            .pipeThrough(new TextDecoderStream())
-            .pipeThrough(new TransformStream(this.flushableTransformer))
             .getReader();
 
         console.info("port opened");
         await this.wait(10);
-        await this.write(resetAlarm()[0]); // ALRS Alarm reset command
-        console.info("response: " + await this.readOnce());
+
+        await this.write(resetAlarm[0]); // ALRS Alarm reset command
+        console.info("response: " + Thruster.toHex(await this.readOnce()));
         await this.wait(20);
-        await this.write(resetAlarm()[1]); // ALRS Alarm reset command  (2)
-        console.info("response: " + await this.readOnce());
+        await this.write(resetAlarm[1]); // ALRS Alarm reset command  (2)
+        console.info("response: " + Thruster.toHex(await this.readOnce()));
         await this.wait(20);
-        await this.write(":01050427FF00D0\r\n"); // PMSL PIO/Modbus Switching Setting (Enable Modus commands)
-        console.info("response: " + await this.readOnce());
+
+        await this.write(pioModbusOnCommand); // PMSL PIO/Modbus Switching Setting (Enable Modus commands)
+        console.info("response: " + Thruster.toHex(await this.readOnce()));
         await this.wait(20);
-        await this.write(":01050403FF00F4\r\n"); // SON Servo ON/OFF  Servo ON (FF00)
-        console.info("response: " + await this.readOnce());
+        await this.write(servoOnCommand(true)); // SON Servo ON/OFF  Servo ON (FF00)
+        console.info("response: " + Thruster.toHex(await this.readOnce()));
         await this.wait(20);
-        await this.write(":0105040B0000EB\r\n"); // HOME Home Return Start (0000)
-        console.info("response: " + await this.readOnce());
+        await this.write(homeReturn[0]); // HOME Home Return Start (0000)
+        console.info("response: " + Thruster.toHex(await this.readOnce()));
         await this.wait(20);
-        await this.write(":0105040BFF00EC\r\n"); // HOME Home Return End (FF00)
-        console.info("response: " + await this.readOnce());
+        await this.write(homeReturn[1]); // HOME Home Return End (FF00)
+        console.info("response: " + Thruster.toHex(await this.readOnce()));
         await this.wait(20);
         //await this.write(ThrusterProtocol.queryDeviceStatusCommand());
         //await this.wait(10);
         console.info("Started Homing. Waiting for homing to complete...");
 
-        const response = await this.queryResponseWithRetry(ThrusterProtocol.queryDeviceStatusCommand(),
+        const response = await this.queryAwaitResponseWithRetry(queryDeviceStatusCommand,
             (r) => {
-                const parsedDeviceStatusReponse = ThrusterProtocol.parseDeviceStatusResponse(r);
-                return parsedDeviceStatusReponse.dss1.has(ThrusterProtocol.DSS1.HEND) ? parsedDeviceStatusReponse : undefined
+                const parsedDeviceStatusResponse = parseDeviceStatusResponse(r);
+                return parsedDeviceStatusResponse.dss1.has(DSS1.HEND) ? parsedDeviceStatusResponse : undefined
             }, 8, 1000);
 
         this.deviceStatusRegister1 = response.dss1;
         this.deviceStatusRegister2 = response.dss2;
         console.info("Waited for homing completed.")
-
     }
 
-    private async readOnce(): Promise<string | undefined> {
+    private async readOnce(): Promise<Uint8Array | undefined> {
         const res = await this.reader!.read();
         return res.value;
     }
 
-    private async queryResponseWithRetry<T>(query: string, responseExtractor: (a: string) => T | undefined, retryCount: number | undefined = undefined, retryInterval: number | undefined = undefined): Promise<T> {
+    /**
+     * Retries query until it is followed by a response matched by the responseExtractor (emitting a non undefined value).
+     * @param query the command to execute on each retry.
+     * @param responseExtractor response matcher that should extract only a value when it matches. If it fails it should return undefined.
+     * @param retryCount How often should the query be retried.
+     * @param retryInterval How much time should be waited between different query attempts.
+     */
+    private async queryAwaitResponseWithRetry<T>(query: ArrayBufferLike, responseExtractor: (a: Uint8Array) => T | undefined, retryCount: number | undefined = undefined, retryInterval: number | undefined = undefined): Promise<T> {
 
         const actualRetryCount = retryCount || 3;
         const actualRetryInterval = retryInterval || 100;
@@ -127,25 +129,20 @@ export class Thruster {
         throw new Error("Retried " + actualRetryCount + " but failed to accept response.");
     }
 
-    /***
-     * @param cmd the command without LRC check and leading colon.
-     */
-    private async write(cmd: string): Promise<void> {
-        console.info("writing cmd: " + cmd);
-        await this.writer!.write(this.encoder.encode(cmd));
+    private static toHex(buf: Uint8Array | undefined): string | undefined {
+        if (buf === undefined) {
+            return undefined;
+        }
+        return [...buf].map((x: number) => x.toString(16).padStart(2, '0')).join('').toUpperCase();
     }
 
-    private async writeRTU(cmd: ArrayBufferLike): Promise<void> {
+    private async write(cmd: ArrayBufferLike): Promise<void> {
         const uint8Array = new Uint8Array(cmd);
-        function buf2hex() : string {
-            return [...uint8Array].map((x:number) => x.toString(16).padStart(2, '0')).join('').toUpperCase();
-        }
-        console.info("writing cmd: " + buf2hex());
+        console.info("writing cmd: 0x" + Thruster.toHex(uint8Array));
         await this.writer!.write(uint8Array);
     }
 
     private async wait(ms: number) {
         await new Promise(resolve => setTimeout(resolve, ms));
     }
-
 }
