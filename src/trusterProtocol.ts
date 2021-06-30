@@ -572,15 +572,10 @@ const exceptionMap = [
     'Slave Device Failure'
 ];
 
-
-function buildQueryDeviceStatusCommand(): ArrayBufferLike {
-    return queryHoldingRegisters(0x9005, 2)
-}
-
 /**
  * DSS1/2 Controller Status Signal Reading 1 (reading two registers DSS1 and DSS2)
  */
-export const queryDeviceStatusCommand = buildQueryDeviceStatusCommand();
+export const queryDeviceStatusCommand =  queryHoldingRegisters(0x9005, 2);
 
 export function parseDeviceStatusResponse(response: Uint8Array): { dss1: Set<DSS1>, dss2: Set<DSS2> } {
     const responseData = parseQueryHoldingRegistersResponse(response);
@@ -615,27 +610,20 @@ export function queryForceFeedback(): ArrayBuffer {
 }
 
 
-function buildDecelerationStopCommand(): ArrayBuffer {
-    return forceSingleCoil(0x042C, 0xFF00);
-}
-
 /**
  *  Deceleration Stop <<STOP>>
  * The actuator will start decelerating to a stop when the deceleration stop command edge (write FF00H) is turned on.
  */
-export const decelerationStopCommand = buildDecelerationStopCommand();
+export const decelerationStopCommand = forceSingleCoil(0x042C, 0xFF00);
 
 
-function buildQueryInputSignalStatus(): ArrayBuffer {
-    return queryHoldingRegisters(0x9003, 2);
-}
 
 /**
  * Register reading DIPM Input port query  Input port monitor register (9003), 2 registers,
  * Used to determine if the hand switch is pressed.
  * TODO: Why are two registers read?
  */
-export const queryInputSignalStatus = buildQueryInputSignalStatus();
+export const queryInputSignalStatus = queryHoldingRegisters(0x9003, 2);
 
 export function parseInputSignalStatusResponse(response: Uint8Array): { inputStatus: number } {
     crcCheck(response);
@@ -676,6 +664,41 @@ function parseQueryHoldingRegistersResponse(response: Uint8Array): ArrayBufferLi
     const view = new DataView(response.buffer);
     const numberOfDataBytes = view.getUint8(2);
     return view.buffer.slice(3, 3 + numberOfDataBytes);
+}
+
+/**
+ * This query reads the code indicating the normal status or alarm status (cold start level, operation cancellation level and message level) of the controller.
+ * In the normal status, 0x00 is stored.
+ */
+export const presentAlarmCodeReading = queryHoldingRegisters(0x9002, 1);
+
+export function parsePresentAlarmCodeResponse(response: Uint8Array) {
+    const data = parseQueryHoldingRegistersResponse(response);
+    if (data.byteLength != 2) {
+        throw new Error("Expected a 2 byte response but got " + data.byteLength);
+    }
+    return new DataView(data).getUint16(0);
+}
+
+export const alarmDetailDescriptionReading = queryHoldingRegisters(0x0500, 6);
+
+export function parseAlarmDetailDescriptionReadingResponse(response: Uint8Array) {
+    const data = parseQueryHoldingRegistersResponse(response);
+    if (data.byteLength != 12) {
+        throw new Error("Expected a 12 byte response but got " + data.byteLength);
+    }
+    const view = new DataView(data);
+    const detailCode = view.getUint16(0);
+    const address = view.getUint16(2);
+    const code = view.getUint32(4);
+    const occurrenceTime = view.getUint32(8);
+
+    return {
+        detailCode,
+        address,
+        code,
+        occurrenceTime
+    }
 }
 
 function crcCheck(response: Uint8Array): void {

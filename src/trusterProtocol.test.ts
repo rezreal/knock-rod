@@ -1,12 +1,13 @@
 import {
+  alarmDetailDescriptionReading,
   CTLF,
   decelerationStopCommand,
   DSS1,
   enumBitSetFromNumber,
   homeReturn,
   numberFromEnumBitSet,
-  numericalValueMovementCommand,
-  parseException,
+  numericalValueMovementCommand, parseAlarmDetailDescriptionReadingResponse,
+  parseException, parsePresentAlarmCodeResponse,
   pioModbusOnCommand,
   positionCommand,
   positionVelocityAndAccelerationCommand,
@@ -80,8 +81,20 @@ describe('TrusterProtocol', () => {
     expect(buf2hex(decelerationStopCommand)).toEqual("0105042CFF004CC3");
   });
 
+  it('alarmDetailDescriptionReading works according to spec', () => {
+    expect(buf2hex(alarmDetailDescriptionReading)).toEqual("010305000006C504");
+  });
+
   it('parseException works according to spec', () => {
     expect(parseException(hex2Buf("03820260A1"))).toEqual({ originalFunctionCode: 0x02, exceptionCode: 2,  exceptionMessage: 'Illegal Data Address'});
+  });
+
+  it('parseAlarmDetailDescriptionReadingResponse works according to spec', () => {
+    expect(parseAlarmDetailDescriptionReadingResponse(hex2Buf("01030C0000FFFF000000E8172C643F2DCD"))).toEqual({ detailCode: 0x0000, address: 0xFFFF,  code: 0x000000E8, occurrenceTime: 0x172C643F});
+  });
+
+  it('parsePresentAlarmCodeResponse works according to spec', () => {
+    expect(parsePresentAlarmCodeResponse(hex2Buf("01030200E8B80A"))).toEqual(0x00E8);
   });
 
   it('numberFromEnumBitSet works by summing up its values', () => {
