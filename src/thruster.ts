@@ -1,10 +1,11 @@
 import {
+    CTLF,
     DSS1,
     DSS2,
     homeReturn,
+    numericalValueMovementCommand,
     parseDeviceStatusResponse,
     pioModbusOnCommand,
-    positionVelocityAndAccelerationCommand,
     queryDeviceStatusCommand,
     resetAlarm,
     servoOnCommand
@@ -22,12 +23,32 @@ export class Thruster {
     private deviceStatusRegister1: Set<DSS1> = new Set()
     private deviceStatusRegister2: Set<DSS2> = new Set()
 
-    constructor(private readonly port: SerialPort) {
+    public get status(): ReadonlySet<DSS1> {
+        return this.deviceStatusRegister1;
     }
 
 
+    constructor(private readonly port: SerialPort) {
+    }
+
     public async move(): Promise<void> {
-        await this.write(positionVelocityAndAccelerationCommand(Math.round(Math.random() * 18000), Math.round(10000 + Math.random() * 20000), Math.round(Math.random() * 30 + 1), 10));
+        await this.write(numericalValueMovementCommand(
+            100,
+            5000,//10,
+            30000,
+            1,
+            0, //51,
+            []));
+    }
+
+    public async move2(): Promise<void> {
+        await this.write(numericalValueMovementCommand(
+            14000,
+            8000,//10,
+            20000,
+            30,
+             10,//51, //51,
+            [CTLF.PUSH]));
     }
 
     public async home(): Promise<void> {
@@ -66,25 +87,39 @@ export class Thruster {
         await this.write(servoOnCommand(true)); // SON Servo ON/OFF  Servo ON (FF00)
         console.info("response: " + Thruster.toHex(await this.readOnce()));
         await this.wait(20);
-        await this.write(homeReturn[0]); // HOME Home Return Start (0000)
-        console.info("response: " + Thruster.toHex(await this.readOnce()));
-        await this.wait(20);
-        await this.write(homeReturn[1]); // HOME Home Return End (FF00)
-        console.info("response: " + Thruster.toHex(await this.readOnce()));
-        await this.wait(20);
+
         //await this.write(ThrusterProtocol.queryDeviceStatusCommand());
         //await this.wait(10);
         console.info("Started Homing. Waiting for homing to complete...");
 
-        const response = await this.queryAwaitResponseWithRetry(queryDeviceStatusCommand,
-            (r) => {
-                const parsedDeviceStatusResponse = parseDeviceStatusResponse(r);
-                return parsedDeviceStatusResponse.dss1.has(DSS1.HEND) ? parsedDeviceStatusResponse : undefined
-            }, 8, 1000);
+        const r1 = await this.queryAwaitResponseWithRetry(queryDeviceStatusCommand,
+            (r) =>  parseDeviceStatusResponse(r), 8, 1000);
+        this.deviceStatusRegister1 = r1.dss1;
+        this.deviceStatusRegister2 = r1.dss2;
 
-        this.deviceStatusRegister1 = response.dss1;
-        this.deviceStatusRegister2 = response.dss2;
+        // home if necessary
+        if (!r1.dss1.has(DSS1.HEND)) {
+
+            await this.write(homeReturn[0]); // HOME Home Return Start (0000)
+            console.info("response: " + Thruster.toHex(await this.readOnce()));
+            await this.wait(20);
+            await this.write(homeReturn[1]); // HOME Home Return End (FF00)
+            console.info("response: " + Thruster.toHex(await this.readOnce()));
+            await this.wait(20);
+
+            const r2 = await this.queryAwaitResponseWithRetry(queryDeviceStatusCommand,
+                (r) => {
+                    const parsedDeviceStatusResponse = parseDeviceStatusResponse(r);
+                    return parsedDeviceStatusResponse.dss1.has(DSS1.HEND) ? parsedDeviceStatusResponse : undefined
+                }, 8, 1000);
+            this.deviceStatusRegister1 = r2.dss1;
+            this.deviceStatusRegister2 = r2.dss2;
+
+        }
+
+
         console.info("Waited for homing completed.")
+
     }
 
     private async readOnce(): Promise<Uint8Array | undefined> {

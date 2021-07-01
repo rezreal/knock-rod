@@ -674,7 +674,7 @@ export const presentAlarmCodeReading = queryHoldingRegisters(0x9002, 1);
 
 export function parsePresentAlarmCodeResponse(response: Uint8Array) {
     const data = parseQueryHoldingRegistersResponse(response);
-    if (data.byteLength != 2) {
+    if (data.byteLength !== 2) {
         throw new Error("Expected a 2 byte response but got " + data.byteLength);
     }
     return new DataView(data).getUint16(0);
@@ -684,7 +684,7 @@ export const alarmDetailDescriptionReading = queryHoldingRegisters(0x0500, 6);
 
 export function parseAlarmDetailDescriptionReadingResponse(response: Uint8Array) {
     const data = parseQueryHoldingRegistersResponse(response);
-    if (data.byteLength != 12) {
+    if (data.byteLength !== 12) {
         throw new Error("Expected a 12 byte response but got " + data.byteLength);
     }
     const view = new DataView(data);
