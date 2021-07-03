@@ -9,14 +9,19 @@ function App() {
   const [state, setState] = useState<KnockRodState | undefined>(undefined);
   const [rod, setRod] = useState<KnockRod | undefined>(undefined);
 
-  const onPalmDown = useCallback((e) => {
-    console.info(`palmdown rod:${rod}  state:${state}`)
-    rod!.moveTo(state?.currentPosition + 1000)
+  const onPalmDown = useCallback(() => {
+    if (rod && state) {
+      return rod.moveTo(state.currentPosition + 1000);
+    }
+    return Promise.resolve();
+
   }, [rod, state]);
 
-  const onPalmUp = useCallback((e) => {
-    console.info(`palmup rod:${rod} `)
-    rod!.moveTo(1000)
+  const onPalmUp = useCallback(() => {
+    if (rod) {
+      return rod.moveTo(1000);
+    }
+    return Promise.resolve();
   }, [rod]);
 
   useEffect(() => {
