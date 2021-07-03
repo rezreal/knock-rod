@@ -205,7 +205,7 @@ export function numberFromEnumBitSet(values: readonly number[]): number {
     return i;
 }
 
-function enumNumberToString(allValues: any): ((n: number) => string) {
+export function enumNumberToString(allValues: any): ((n: number) => string) {
     return (index) => allValues[index.toString()];
 }
 
