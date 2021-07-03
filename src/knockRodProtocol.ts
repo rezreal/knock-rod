@@ -144,7 +144,7 @@ export enum DSSE {
 /**
  * Control Flag Specification Register (CTLF) bit set
  */
-enum CTLF {
+export enum CTLF {
 
     /**
      * 0: Normal operation (default)
@@ -199,10 +199,15 @@ export function enumBitSetFromNumber(bitset: number, allValues: any): ReadonlySe
     return flags;
 }
 
+export function numberFromEnumBitSet(values: readonly number[]): number {
+    let i: number = 0;
+    values.forEach(v => i |= v)
+    return i;
+}
+
 function enumNumberToString(allValues: any): ((n: number) => string) {
     return (index) => allValues[index.toString()];
 }
-
 
 /**
  *  device status register 2 (0x9005)
@@ -419,70 +424,61 @@ export enum FunctionCode {
     ReadWriteRegister = 0x17
 }
 
-export function calculateLRC(cmd: string): string {
-    if (cmd.length % 2 !== 0) {
-        throw new Error("Unexpected command length!")
-    }
-    let sum: number = 0;
-    for (let i = 0; i < cmd.length; i += 2) {
-        sum += parseInt(cmd.substr(i, 2), 16);
-    }
-    const complement = ~sum + 1 >>> 0;
-    return complement.toString(16).slice(-2).toUpperCase();
-}
-
-export function buildCommand(rawCmd: string): string {
-    return `:${rawCmd}${calculateLRC(rawCmd)}\r\n`;
-}
-
-
 /**
  * Queries the first 10 Status registers.
  */
-export function queryStatusRegister(): string {
-    return buildCommand("01039000000A")
+export const queryStatusRegisters = queryHoldingRegisters(0x9000, 10);
+
+
+export function parseQueryStatusRegisterResponse(response: Uint8Array): { pnow: number, almc: number, dipm:number, dipo:number, dss1: Set<DSS1>, dss2: Set<DSS2>, dsse: Set<DSSE>, stat: Set<STAT> } {
+    const responseData = parseQueryHoldingRegistersResponse(response);
+    const view = new DataView(responseData);
+
+    const pnow = view.getInt32(0);
+    const almc = view.getInt16(4);
+    const dipm = view.getInt16(6);
+    const dipo = view.getInt16(8);
+    const dss1 = enumBitSetFromNumber(view.getUint16(10), DSS1) as any as Set<DSS1>
+    const dss2 = enumBitSetFromNumber(view.getUint16(12), DSS2) as any as Set<DSS2>;
+    const dsse = enumBitSetFromNumber(view.getUint16(14), DSSE) as any as Set<DSSE>;
+    const stat = enumBitSetFromNumber(view.getUint32(16), STAT) as any as Set<STAT>;
+    return {pnow, almc, dipm, dipo, dss1, dss2, dsse, stat}
 }
 
-export function queryStatusRegisterRtu(): ArrayBuffer {
-    const buffer = new ArrayBuffer(8);
-    writeHeader(FunctionCode.ReadHoldingRegisters, buffer);
-    const v = new DataView(buffer);
-    v.setUint16(2, 0x9000);
-    v.setUint16(4, 0x000A);
-    v.setUint16(6, crc16modbus(Buffer.from(buffer, 0, 6)), true);
-    return buffer;
-}
 
+
+function buildResetAlarm(reset: boolean) {
+    return forceSingleCoil(0x0407, reset ? 0xFF00 : 0x00);
+}
 
 /**
  * ALRS
- * When the alarm reset edge is turned on (the data is first set to FF00H and then changed to 0000H),
+ * When the alarm reset edge is turned on (the data is first set to FF00 and then changed to 0000),
  * alarms will be reset.
  * Requires both commands to be sent.
  */
-export function resetAlarm(): [string, string] {
-    return [":01050407FF00F0\r\n", ":010504070000EF\r\n"];
-}
+export const resetAlarm: Readonly<[ArrayBuffer, ArrayBuffer]> = [buildResetAlarm(true), buildResetAlarm(false)]
 
 /**
- * Brake Forced Release BKRL
- *
+ * Brake Forced Release BKRL TODO: test
  */
-export function forceReleaseBreak(release: boolean): string {
-    return buildCommand(`01050408${release ? 'FF00' : '0000'}`);
+export function forceReleaseBreak(release: boolean): ArrayBuffer {
+    return forceSingleCoil(0x0408, release ? 0xFF00 : 0x0000)
 }
 
+
+
+export const pioModbusOnCommand = pioModbusSwitch(true);
+
+
+export function servoOnCommand(on: boolean): ArrayBuffer {
+    return forceSingleCoil(0x0403, on ? 0xFF00 : 0x0000)
+}
 
 /**
  * Direct writing of positioning Data Target position coordinate specification register PCMD 9900 Register size 2 register 4 bytes (Unit 0.01 mm)
  */
-export function positionCommand(targetPosition: number): string {
-    const targetPositionString = encodeNumber(targetPosition, 4);
-    let cmd = `01109900000204${targetPositionString}`;
-    return buildCommand(cmd);
-}
-
-export function positionCommandRtu(targetPosition: number): ArrayBuffer {
+export function positionCommand(targetPosition: number): ArrayBuffer {
     const buffer = new ArrayBuffer(13);
     writeHeader(FunctionCode.PresetMultipleRegisters, buffer)
     const v = new DataView(buffer);
@@ -494,80 +490,91 @@ export function positionCommandRtu(targetPosition: number): ArrayBuffer {
     return buffer;
 }
 
-function writeHeader(functionCode: number, buffer: ArrayBuffer) {
-    const v = new DataView(buffer);
-    v.setInt8(0, 0x01);
-    v.setInt8(1, functionCode);
+function pioModbusSwitch(modbus: boolean): ArrayBuffer {
+    return forceSingleCoil(0x0427, modbus ? 0xFF00 : 0x0000)
+}
+
+function buildHomeReturn(ret: boolean): ArrayBuffer {
+    const buffer = new ArrayBuffer(8);
+    writeHeader(FunctionCode.ForceSingleCoil, buffer)
+    const d1 = new DataView(buffer);
+    d1.setUint16(2, 0x040B);
+    d1.setUint16(4, ret ? 0xFF00 : 0x0000);
+    d1.setUint16(6, crc16modbus(Buffer.from(buffer, 0, 6)), true);
+    return buffer;
 }
 
 /**
- * Positioning Data Direct Writing (Queries Using Code 10))
- * VCMD Speed specification register (2 byte in 0.01 mm/sec) Writing 3 registers, 2 bytes each
- * ACMD Acceleration/deceleration specification register (1 byte in 0.01 G)
+ * Two commands to initiate a homing operation.
  */
-export function velocityAndAccelerationCommand(velocity: number, acceleration: number): string {
-    const velocityStr = encodeNumber(velocity, 4)
-    const accelerationStr = encodeNumber(acceleration, 2);
-    return buildCommand(`01109904000306${velocityStr}${accelerationStr}`);
-}
+export const homeReturn: Readonly<[ArrayBuffer, ArrayBuffer]> = [buildHomeReturn(false), buildHomeReturn(true)]
 
-function encodeNumber(n: number, bytes: number): string {
-    return n.toString(16).toUpperCase().padStart(bytes * 2, "0").slice(-(bytes * 2))
+
+export function positionVelocityAndAccelerationCommand(targetPosition: number, velocity: number, acceleration: number, targetPositionBand: number = 10): ArrayBuffer {
+    const buffer = new ArrayBuffer(23);
+    writeHeader(FunctionCode.PresetMultipleRegisters, buffer)
+    const v = new DataView(buffer);
+    v.setInt16(2, 0x9900); //target position specification register
+    v.setInt16(4, 0x0007); // register count
+    v.setInt8(6, 0x0E); // byteCount
+    v.setInt32(7, targetPosition); // unsigned might be used for relative offsets
+    v.setUint32(11, targetPositionBand);
+    v.setUint32(15, velocity);
+    v.setUint16(19, acceleration);
+    v.setUint16(21, crc16modbus(Buffer.from(buffer, 0, 21)), true);
+    return buffer;
 }
 
 /**
  * Positioning Data Direct Writing (Queries Using Code 10))
+ * Produces a reponse of size 8 bytes;
  * VCMD Speed specification register (2 byte in 0.01 mm/sec) Writing 3 registers, each 2 bytes
  * ACMD Acceleration/deceleration specification register (1 byte in 0.01 G)
  * @param targetPosition target position in mm/100
  * @param targetPositionBand in mm/100 (default is 0.1 mm)
  * @param velocity in mm/100 (good value is 10 000)
  * @param acceleration in g/100 (valid is [1, 300], good value is 30)
+ * @param pushCurrentLimitingValue Set the current limit during push-motion operation in PPOW. Range: [51-178] (equiv of 20% to 70% of 255). 0 means no limit.
+ * @param controlFlags
  */
-export function positionVelocityAndAccelerationCommand(targetPosition: number, velocity: number, acceleration: number, targetPositionBand: number = 10): string {
-    const targetPositionStr = encodeNumber(targetPosition, 4);
-    const targetPositionBandStr = encodeNumber(targetPositionBand, 4);
-    const velocityStr = encodeNumber(velocity, 4);
-    const accelerationStr = encodeNumber(acceleration, 2);
-    return buildCommand(`0110990000070E${targetPositionStr}${targetPositionBandStr}${velocityStr}${accelerationStr}`);
-}
+export function numericalValueMovementCommand(
+    targetPosition: number,
+    targetPositionBand: number = 10,
+    velocity: number,
+    acceleration: number,
+    pushCurrentLimitingValue: number,
+    controlFlags: readonly CTLF[]): ArrayBuffer {
 
-export function positionVelocityAndAccelerationCommandRtu(targetPosition: number, velocity: number, acceleration: number, targetPositionBand: number = 10): ArrayBuffer {
-    const buffer = new ArrayBuffer(23);
-    writeHeader(FunctionCode.PresetMultipleRegisters, buffer)
-    const v = new DataView(buffer);
-    v.setInt16(2, 0x9900) //target position specification register
-    v.setInt16(4, 0x0007) // register count
-    v.setInt8(6, 0x0E) // byteCount
-    v.setInt32(7, targetPosition) // unsigned might be used for relative offsets
-    v.setUint32(11, targetPositionBand)
-    v.setUint32(15, velocity)
-    v.setUint16(19, acceleration)
-    v.setUint16(21, crc16modbus(Buffer.from(buffer, 0, 21)), true)
+    const buffer = new ArrayBuffer(27);
+    writeHeader(FunctionCode.PresetMultipleRegisters, buffer);
+    const view = new DataView(buffer);
+    view.setUint16(2, 0x9900);
+    view.setUint16(4, 0x0009);
+    view.setUint8(6, 0x12);
+    view.setInt32(7, targetPosition); // unsigned might be used for relative offsets
+    view.setInt32(11, targetPositionBand);
+    view.setUint32(15, velocity);
+    view.setUint16(19, acceleration);
+    view.setUint16(21, pushCurrentLimitingValue);
+    view.setUint16(23, numberFromEnumBitSet(controlFlags));
+    view.setUint16(25, crc16modbus(Buffer.from(buffer, 0, 25)), true);
     return buffer;
-}
-
-/**
- * Set Push-current limiting value (PPOW)
- * Set the current limit during push-motion operation in PPOW. Set an appropriate value by referring to the table below.
- * Pushable range: 20 to 70(%) of 255
- */
-export function foo() {
-    // TODO
 }
 
 /**
  * Parses a response if it is an exception.
  */
-export function parseException(response: string): { exceptionCode: number, exceptionMessage: string } {
-    lrcCheck(response);
-    if (!response.charAt(3)) {
+export function parseException(response: Uint8Array): { originalFunctionCode: number, exceptionCode: number, exceptionMessage: string } {
+    crcCheck(response);
+    const view = new DataView(response.buffer);
+    const functionCode = view.getUint8(1);
+    if ((functionCode & 0x80) !== 0x80) {
         throw new Error("Response is not an exception (Function Code MSB is not set to 1).")
     }
-
-    const exceptionCode = parseInt(response.slice(5, 7), 16);
+    const originalFunctionCode = functionCode ^ 0x80;
+    const exceptionCode = view.getUint8(2);
     const exceptionMessage = exceptionMap[exceptionCode - 1] || 'Unknown Exception Code';
-    return {exceptionCode, exceptionMessage}
+    return {originalFunctionCode, exceptionCode, exceptionMessage}
 }
 
 const exceptionMap = [
@@ -577,88 +584,146 @@ const exceptionMap = [
     'Slave Device Failure'
 ];
 
+
 /**
- * DSS1 Controller Status Signal Reading 1 (reading two registers DSS1 and DSS2 ?)
+ * DSS1/2 Controller Status Signal Reading 1 (reading two registers DSS1 and DSS2)
  */
-export function queryDeviceStatusCommand(): string {
-    return buildCommand("010390050002")
-}
+/**
+export const queryDeviceStatusCommand =  queryHoldingRegisters(0x9005, 2);
 
-export function parseDeviceStatusResponse(response: string): { dss1: Set<DSS1>, dss2: Set<DSS2> } {
-    lrcCheck(response);
-    // Data of Register Read (03) starts at character 7
-    const dss1Hex = response.slice(7, 11)
-    const dss2Hex = response.slice(11, 15)
-    const dss1 = enumBitSetFromNumber(parseInt(dss1Hex, 16), DSS1) as any as Set<DSS1>;
-    const dss2 = enumBitSetFromNumber(parseInt(dss2Hex, 16), DSS2) as any as Set<DSS2>;
-
-    console.info(`Parsed parseDeviceStatusResponse from response: ${response} dss1: ${Array.from(dss1)} (${Array.from(dss1).map(enumNumberToString(DSS1))})  dss2:${Array.from(dss2).map(enumNumberToString(DSS2))}`)
-
+export function parseDeviceStatusResponse(response: Uint8Array): { dss1: Set<DSS1>, dss2: Set<DSS2> } {
+    const responseData = parseQueryHoldingRegistersResponse(response);
+    const view = new DataView(responseData);
+    const dss1 = enumBitSetFromNumber(view.getUint16(0), DSS1) as any as Set<DSS1>
+    const dss2 = enumBitSetFromNumber(view.getUint16(2), DSS2) as any as Set<DSS2>;
+    //console.info(`Parsed parseDeviceStatusResponse from response: ${response} dss1: ${Array.from(dss1)} (${Array.from(dss1).map(enumNumberToString(DSS1))})  dss2:${Array.from(dss2).map(enumNumberToString(DSS2))}`)
     return {dss1, dss2}
 }
+ **/
 
 /**
  * Queries: TODO: check if shockspot hardware supports this at all
  * - Total moving count (TLMC) 2Registers, 4bytes
  * - Total moving distance (ODOM) 2Registers, 4bytes (unit of 1m)
  */
-export function queryDeviceMovementHistory(): string {
-    return buildCommand("010384000004")
+export function queryDeviceMovementHistory(): ArrayBuffer {
+    return queryHoldingRegisters(0x8400, 4);
 }
 
-export function parseDeviceMovementHistory(response: string): { totalMovingCount: number, totalMovingDistance: number } {
-    lrcCheck(response);
-    // Data of Register Read (03) starts at character 7
-    const tlmcHex = response.slice(7, 15);
-    const odomHex = response.slice(15, 23);
-    return {totalMovingCount: parseInt(tlmcHex, 16), totalMovingDistance: parseInt(odomHex, 16)}
+export function parseDeviceMovementHistory(response: Uint8Array): { totalMovingCount: number, totalMovingDistance: number } {
+    const data = parseQueryHoldingRegistersResponse(response);
+    const view = new DataView(data);
+    return {totalMovingCount: view.getUint32(0), totalMovingDistance: view.getUint32(4)}
 }
 
 /**
  * Queries: TODO: check if force feedback is supported at all
  * - Force Feedback Data Reading (FBFC) 2 registers, 4bytes (unit 0.01 N.)
  */
-export function queryForceFeedback(): string {
-    return buildCommand("0103901E0002")
+export function queryForceFeedback(): ArrayBuffer {
+    return queryHoldingRegisters(0x901E, 2);
 }
+
 
 /**
  *  Deceleration Stop <<STOP>>
  * The actuator will start decelerating to a stop when the deceleration stop command edge (write FF00H) is turned on.
  */
-export function decelerationStopCommand(): string {
-    return buildCommand("0105042CFF00");
-}
+export const decelerationStopCommand = forceSingleCoil(0x042C, 0xFF00);
+
+
 
 /**
  * Register reading DIPM Input port query  Input port monitor register (9003), 2 registers,
  * Used to determine if the hand switch is pressed.
  * TODO: Why are two registers read?
  */
-export function queryInputSignalStatus(): string {
-    return buildCommand("010390030002");
-}
+export const queryInputSignalStatus = queryHoldingRegisters(0x9003, 2);
 
-function lrcCheck(response: string): void {
-    if (!response.startsWith(":")) {
-        throw new Error("Expected response to begin with :");
-    }
-    if (response.length < 4) {
-        throw new Error("Reponse must be at least 4 characters long.");
-    }
-    const data = response.slice(1, -2);
-    const presendedLrc = response.slice(-2);
-    const expectedLrc = calculateLRC(data)
-    if (expectedLrc !== presendedLrc) {
-        throw new Error(`LRC mismatch. Expected: ${expectedLrc} but received: ${presendedLrc})`);
-    }
-}
-
-export function parseInputSignalStatusResponse(response: string): { inputStatus: number } {
-    lrcCheck(response);
+export function parseInputSignalStatusResponse(response: Uint8Array): { inputStatus: number } {
+    crcCheck(response);
+    const buffer = response.buffer;
+    const view = new DataView(buffer);
+    return {inputStatus: view.getUint16(7)};
     // Data of Register Read (03) starts at character 7
-    const dataHex = response.slice(7, 11);
-    return {inputStatus: parseInt(dataHex, 16)}
 }
 
+function forceSingleCoil(address: number, data: number): ArrayBuffer {
+    const buffer = new ArrayBuffer(8);
+    writeHeader(FunctionCode.ForceSingleCoil, buffer);
+    const view = new DataView(buffer);
+    view.setUint16(2, address);
+    view.setUint16(4, data);
+    view.setUint16(6, crc16modbus(Buffer.from(buffer, 0, 6) as Buffer), true);
+    return buffer;
+}
 
+function writeHeader(functionCode: number, buffer: ArrayBuffer) {
+    const v = new DataView(buffer);
+    v.setInt8(0, 0x01);
+    v.setInt8(1, functionCode);
+}
+
+function queryHoldingRegisters(address: number, registers: number) {
+    const buffer = new ArrayBuffer(8);
+    writeHeader(FunctionCode.ReadHoldingRegisters, buffer);
+    const view = new DataView(buffer);
+    view.setUint16(2, address);
+    view.setUint16(4, registers);
+    view.setUint16(6, crc16modbus(Buffer.from(buffer, 0, 6)), true);
+    return buffer;
+}
+
+function parseQueryHoldingRegistersResponse(response: Uint8Array): ArrayBufferLike {
+    crcCheck(response);
+    const view = new DataView(response.buffer);
+    const numberOfDataBytes = view.getUint8(2);
+    return view.buffer.slice(3, 3 + numberOfDataBytes);
+}
+
+/**
+ * This query reads the code indicating the normal status or alarm status (cold start level, operation cancellation level and message level) of the controller.
+ * In the normal status, 0x00 is stored.
+ */
+export const presentAlarmCodeReading = queryHoldingRegisters(0x9002, 1);
+
+export function parsePresentAlarmCodeResponse(response: Uint8Array) {
+    const data = parseQueryHoldingRegistersResponse(response);
+    if (data.byteLength !== 2) {
+        throw new Error("Expected a 2 byte response but got " + data.byteLength);
+    }
+    return new DataView(data).getUint16(0);
+}
+
+export const alarmDetailDescriptionReading = queryHoldingRegisters(0x0500, 6);
+
+export function parseAlarmDetailDescriptionReadingResponse(response: Uint8Array) {
+    const data = parseQueryHoldingRegistersResponse(response);
+    if (data.byteLength !== 12) {
+        throw new Error("Expected a 12 byte response but got " + data.byteLength);
+    }
+    const view = new DataView(data);
+    const detailCode = view.getUint16(0);
+    const address = view.getUint16(2);
+    const code = view.getUint32(4);
+    const occurrenceTime = view.getUint32(8);
+
+    return {
+        detailCode,
+        address,
+        code,
+        occurrenceTime
+    }
+}
+
+function crcCheck(response: Uint8Array): void {
+    if (response.length < 4) {
+        throw new Error("Response must be at least 4 bytes long.");
+    }
+    const dataView = new DataView(response.buffer);
+    const expectedCrc = crc16modbus(Buffer.from(response.buffer, 0, response.length - 2) as Buffer);
+    const presentedCrc = dataView.getUint16(response.length - 2, true);
+    if (expectedCrc !== presentedCrc) {
+        throw new Error(`CRC missmatch: Expected ${presentedCrc} but received ${expectedCrc}`);
+    }
+}
