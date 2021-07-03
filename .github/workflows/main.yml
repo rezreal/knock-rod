@@ -26,7 +26,7 @@ jobs:
       - name: Build
         run: yarn build
         env:
-          PUBLIC_URL: "https://rezreal.github.io/knock-lot/"
+          PUBLIC_URL: "https://rezreal.github.io/knock-rod/"
 
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@releases/v3
