@@ -1,8 +1,7 @@
-
 import './App.css';
-import {KnockRod,} from "./knockRod";
-import {DSS1, DSSE} from "./knockRodProtocol";
-import {useState} from "react";
+import {KnockRod, ShockRodSize,} from "./knockRod";
+import {DSS1, DSSE, STAT} from "./knockRodProtocol";
+import {useCallback, useEffect, useState} from "react";
 import {KnockRodState} from "./knockRodState";
 
 
@@ -10,15 +9,32 @@ function App() {
   const [state, setState] = useState<KnockRodState | undefined>(undefined);
   const [rod, setRod] = useState<KnockRod | undefined>(undefined);
 
+  const onPalmDown = useCallback((e) => {
+    console.info(`palmdown rod:${rod}  state:${state}`)
+    rod!.moveTo(state?.currentPosition + 1000)
+  }, [rod, state]);
+
+  const onPalmUp = useCallback((e) => {
+    console.info(`palmup rod:${rod} `)
+    rod!.moveTo(1000)
+  }, [rod]);
+
+  useEffect(() => {
+    rod?.addEventListener('palmdown', onPalmDown);
+    rod?.addEventListener('palmup', onPalmUp);
+    return () => rod?.removeEventListener('palmdown', onPalmDown) && rod?.removeEventListener('palmup', onPalmUp) ;
+  }, [rod, onPalmDown, onPalmUp]);
+
   async function go() {
 
     const ports = await window.navigator.serial.getPorts();
 
     const port = ports.length === 0 ? await window.navigator.serial.requestPort({}) : ports[0];
-    let t = new KnockRod(port);
+    let t = new KnockRod(port, ShockRodSize.EightInch);
     t.addEventListener('stateChange', (e) => setState(e.detail.state))
     await t.init();
     setRod(t);
+
 
     console.info("ready for fun")
   }
@@ -42,32 +58,40 @@ function App() {
         <table>
           <tbody>
           <tr>
-            <td>Positioning Ended:</td>
-            <td>{state.deviceStatusRegister1.has(DSS1.PEND) ? '✔️' : '❌'}</td>
+            <td>Operation mode status  (DSSE.PMSS):</td>
+            <td>{state.systemStatusRegister.has(STAT.RMDS) ? 'MANU️' : 'AUTO'}</td>
           </tr>
           <tr>
-            <td>Homing Ended:</td>
-            <td>{state.deviceStatusRegister1.has(DSS1.HEND) ? '✔️' : '❌'}</td>
+            <td>Modbus enabled (DSSE.PMSS):</td>
+            <td>{state.expansionDeviceStatus.has(DSSE.PMSS) ? '✔️' : '❌'}</td>
           </tr>
           <tr>
             <td>Controller ready status:</td>
             <td>{state.deviceStatusRegister1.has(DSS1.PWR) ? '✔️' : '❌'}</td>
           </tr>
           <tr>
+            <td>Emergency Stop: (DSS1.EMGS)</td>
+            <td>{state.deviceStatusRegister1.has(DSS1.EMGS) ? '🟠' : '⚪'}</td>
+          </tr>
+          <tr>
             <td>Missed work part in push-motion operation:</td>
-            <td>{state.deviceStatusRegister1.has(DSS1.PSFL) ? '⚠️' : '🟩'}</td>
+            <td>{state.deviceStatusRegister1.has(DSS1.PSFL) ? '🟠️' : '⚪'}</td>
           </tr>
           <tr>
             <td>Servo ON status (DSS1.SV):</td>
-            <td>{state.deviceStatusRegister1.has(DSS1.SV) ? '✔️' : '❌'}</td>
+            <td>{state.deviceStatusRegister1.has(DSS1.SV) ? '🟢' : '⚪'}</td>
           </tr>
           <tr>
             <td>Minor failure status (DSS1.ALMH):</td>
-            <td>{state.deviceStatusRegister1.has(DSS1.ALMH) ? '⚠️' : '🟩'}</td>
+            <td>{state.deviceStatusRegister1.has(DSS1.ALMH) ? '🟡' : '⚪'}</td>
           </tr>
           <tr>
             <td>Major failure alarm present (DSS1.ALMH):</td>
-            <td>{state.deviceStatusRegister1.has(DSS1.ALMH) ? '⚠️' : '🟩'}</td>
+            <td>{state.deviceStatusRegister1.has(DSS1.ALMH) ? '🔴️' : '⚪'}</td>
+          </tr>
+          <tr>
+            <td>Input Value:</td>
+            <td>{state.input}</td>
           </tr>
           <tr>
             <td>Current Position:</td>
@@ -75,12 +99,21 @@ function App() {
           </tr>
           <tr>
             <td>Moving signal (DSSE.MOVE):</td>
-            <td>{state.expansionDeviceStatus.has(DSSE.MOVE) ? '✔️' : '❌'}</td>
+            <td>{state.expansionDeviceStatus.has(DSSE.MOVE) ? '🟢️' : '⚪'}</td>
           </tr>
           <tr>
-            <td>Modbus enabled (DSSE.PMSS):</td>
-            <td>{state.expansionDeviceStatus.has(DSSE.PMSS) ? '✔️' : '❌'}</td>
+            <td>Push Motion in progress signal (DSSE.PUSH):</td>
+            <td>{state.expansionDeviceStatus.has(DSSE.PUSH) ? '🟢️' : '⚪'}</td>
           </tr>
+          <tr>
+            <td>Positioning Ended:</td>
+            <td>{state.deviceStatusRegister1.has(DSS1.PEND) ? '✔️' : '❌'}</td>
+          </tr>
+          <tr>
+            <td>Homing Ended:</td>
+            <td>{state.deviceStatusRegister1.has(DSS1.HEND) ? '✔️' : '❌'}</td>
+          </tr>
+
           </tbody>
         </table>
         }

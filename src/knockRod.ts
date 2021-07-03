@@ -25,10 +25,30 @@ export interface StateChangeEvent extends CustomEvent<{ oldState: KnockRodState,
 }
 
 
+export interface PalmDownButtonEvent extends CustomEvent<{ oldState: KnockRodState, state: KnockRodState }> {
+    readonly type: 'palmdown'
+}
+
+export interface PalmUpButtonEvent extends CustomEvent<{ oldState: KnockRodState, state: KnockRodState }> {
+    readonly type: 'palmup'
+}
+
+
+export enum ShockRodSize {
+    FourInch = 100,
+    SixInch = 150,
+    EightInch = 200,
+    TenInch = 250,
+    TwelveInch = 300
+}
+
+
 interface ThrusterEventHandlersEventMap {
     "connected": ConnectedEvent;
     "stateChange": StateChangeEvent;
     "ready": ReadyEvent;
+    "palmdown": PalmDownButtonEvent;
+    "palmup": PalmUpButtonEvent;
 }
 
 export class KnockRod extends DocumentFragment {
@@ -57,13 +77,25 @@ export class KnockRod extends DocumentFragment {
             deviceStatusRegister1: new Set(),
             deviceStatusRegister2: new Set(),
             expansionDeviceStatus: new Set(),
-            currentPosition: 0
+            systemStatusRegister: new Set(),
+            currentPosition: 0,
+            input: 0,
         };
         this._state = updater(oldState);
+
+
+        if ((this._state.input & 0x0001) === 1) {
+            this.dispatchEvent(new CustomEvent('palmdown') as PalmDownButtonEvent);
+        } else if ((this._state.input & 0x0001) === 0 && (oldState.input & 0x0001) === 1) {
+            this.dispatchEvent(new CustomEvent('palmup') as PalmUpButtonEvent);
+        }
+
         this.dispatchEvent(new CustomEvent('stateChange', {detail: {oldState, state: this._state}}) as StateChangeEvent);
     }
 
-    constructor(private readonly port: SerialPort) {
+
+
+    constructor(private readonly port: SerialPort, private readonly size: ShockRodSize) {
         super()
     }
 
@@ -94,6 +126,19 @@ export class KnockRod extends DocumentFragment {
                 []), 8, (a) => a, 1, 0)
         }));
         return Promise.resolve();
+    }
+
+    public async moveTo(targetPos:number): Promise<void> {
+        await this.mutex.runExclusive(async () => {
+            await this.writeBytes(numericalValueMovementCommand(
+                targetPos,
+                10,//10,
+                2000,
+                20,
+                0,//51, //51,
+                []));
+            console.info("response: " + KnockRod.toHex(await this.readBytes(homeReturn[0].byteLength)));
+        })
     }
 
     public async moveSimple(): Promise<void> {
@@ -163,7 +208,7 @@ export class KnockRod extends DocumentFragment {
     private reader: ReadableStreamDefaultReader<Uint8Array> | undefined = undefined;
 
 
-    private readonly timer = new TaskTimer(100);
+    private readonly timer = new TaskTimer(80);
     private readonly mutex = new Mutex();
 
     public async setServo(on: boolean) {
@@ -222,11 +267,13 @@ export class KnockRod extends DocumentFragment {
             console.info("Waited for homing completed.")
         }
 
+        this.timer.start();
+
         dispatchEvent(new CustomEvent('ready', {}) as ReadyEvent
         );
 
 
-        this.timer.start();
+
 
         console.info("Initialize complete.")
 
@@ -242,7 +289,9 @@ export class KnockRod extends DocumentFragment {
                 currentPosition: r.pnow,
                 expansionDeviceStatus: r.dsse,
                 deviceStatusRegister1: r.dss1,
-                deviceStatusRegister2: r.dss2
+                deviceStatusRegister2: r.dss2,
+                systemStatusRegister: r.stat,
+                input: r.dipm
             }));
             return r;
         })
