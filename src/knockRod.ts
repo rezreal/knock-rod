@@ -1,6 +1,6 @@
 import {
     CTLF,
-    DSS1, DSS2, DSSE,
+    DSS1,
     homeReturn,
     numericalValueMovementCommand, parseQueryStatusRegisterResponse,
     pioModbusOnCommand, queryStatusRegisters,
@@ -60,7 +60,7 @@ export class KnockRod extends DocumentFragment {
             currentPosition: 0
         };
         this._state = updater(oldState);
-        this.dispatchEvent(<StateChangeEvent>new CustomEvent('stateChange', {detail: {oldState, state: this._state}}));
+        this.dispatchEvent(new CustomEvent('stateChange', {detail: {oldState, state: this._state}}) as StateChangeEvent);
     }
 
     constructor(private readonly port: SerialPort) {
@@ -149,7 +149,7 @@ export class KnockRod extends DocumentFragment {
 
 
     public addEventListener<K extends keyof ThrusterEventHandlersEventMap>(type: K, listener: ((evt: ThrusterEventHandlersEventMap[K]) => any) | EventListenerObject | null, options?: boolean | AddEventListenerOptions): void {
-        super.addEventListener(type as string, listener as (evt: Event)=> any, options);
+        super.addEventListener(type as string, listener as (evt: Event) => any, options);
     }
 
     /*
@@ -167,7 +167,7 @@ export class KnockRod extends DocumentFragment {
     private readonly mutex = new Mutex();
 
     public async setServo(on: boolean) {
-        console.info("setting servo "+ (on? 'on':'off'));
+        console.info("setting servo " + (on ? 'on' : 'off'));
         const release = await withTimeout(this.mutex, 100).acquire();
         try {
             await this.writeBytes(servoOnCommand(on)); // SON Servo ON/OFF  Servo ON (FF00)
@@ -200,7 +200,7 @@ export class KnockRod extends DocumentFragment {
 
         await this.queryStatusRegister();
 
-        dispatchEvent(<ConnectedEvent>new CustomEvent('connected', {}));
+        dispatchEvent(new CustomEvent('connected', {}) as ConnectedEvent);
 
         // schedule status polling
         this.timer.add(new Task({
@@ -222,8 +222,8 @@ export class KnockRod extends DocumentFragment {
             console.info("Waited for homing completed.")
         }
 
-        dispatchEvent(<ReadyEvent>new CustomEvent('ready', {}));
-
+        dispatchEvent(new CustomEvent('ready', {}) as ReadyEvent
+        );
 
 
         this.timer.start();
@@ -346,7 +346,7 @@ export class KnockRod extends DocumentFragment {
         while (!test()) {
             await this.wait(periodMs);
             if (new Date().getTime() > until) {
-                throw new Error(`Waited for ${test} for ${ms}ms.` );
+                throw new Error(`Waited for ${test} for ${ms}ms.`);
             }
         }
 
