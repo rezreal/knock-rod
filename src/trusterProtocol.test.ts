@@ -16,7 +16,7 @@ import {
   queryStatusRegister,
   resetAlarm,
   servoOnCommand,
-} from "./trusterProtocol";
+} from "./knockRodProtocol";
 
 
 function buf2hex(buffer:ArrayBuffer) : string {

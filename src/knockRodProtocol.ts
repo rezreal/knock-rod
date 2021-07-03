@@ -427,15 +427,25 @@ export enum FunctionCode {
 /**
  * Queries the first 10 Status registers.
  */
-export function queryStatusRegister(): ArrayBuffer {
-    const buffer = new ArrayBuffer(8);
-    writeHeader(FunctionCode.ReadHoldingRegisters, buffer);
-    const v = new DataView(buffer);
-    v.setUint16(2, 0x9000);
-    v.setUint16(4, 0x000A);
-    v.setUint16(6, crc16modbus(Buffer.from(buffer, 0, 6)), true);
-    return buffer;
+export const queryStatusRegisters = queryHoldingRegisters(0x9000, 10);
+
+
+export function parseQueryStatusRegisterResponse(response: Uint8Array): { pnow: number, almc: number, dipm:number, dipo:number, dss1: Set<DSS1>, dss2: Set<DSS2>, dsse: Set<DSSE>, stat: Set<STAT> } {
+    const responseData = parseQueryHoldingRegistersResponse(response);
+    const view = new DataView(responseData);
+
+    const pnow = view.getInt32(0);
+    const almc = view.getInt16(4);
+    const dipm = view.getInt16(6);
+    const dipo = view.getInt16(8);
+    const dss1 = enumBitSetFromNumber(view.getUint16(10), DSS1) as any as Set<DSS1>
+    const dss2 = enumBitSetFromNumber(view.getUint16(12), DSS2) as any as Set<DSS2>;
+    const dsse = enumBitSetFromNumber(view.getUint16(14), DSSE) as any as Set<DSSE>;
+    const stat = enumBitSetFromNumber(view.getUint32(16), STAT) as any as Set<STAT>;
+    return {pnow, almc, dipm, dipo, dss1, dss2, dsse, stat}
 }
+
+
 
 function buildResetAlarm(reset: boolean) {
     return forceSingleCoil(0x0407, reset ? 0xFF00 : 0x00);
@@ -459,6 +469,7 @@ export function forceReleaseBreak(release: boolean): ArrayBuffer {
 
 
 export const pioModbusOnCommand = pioModbusSwitch(true);
+
 
 export function servoOnCommand(on: boolean): ArrayBuffer {
     return forceSingleCoil(0x0403, on ? 0xFF00 : 0x0000)
@@ -516,6 +527,7 @@ export function positionVelocityAndAccelerationCommand(targetPosition: number, v
 
 /**
  * Positioning Data Direct Writing (Queries Using Code 10))
+ * Produces a reponse of size 8 bytes;
  * VCMD Speed specification register (2 byte in 0.01 mm/sec) Writing 3 registers, each 2 bytes
  * ACMD Acceleration/deceleration specification register (1 byte in 0.01 G)
  * @param targetPosition target position in mm/100
@@ -540,7 +552,7 @@ export function numericalValueMovementCommand(
     view.setUint16(4, 0x0009);
     view.setUint8(6, 0x12);
     view.setInt32(7, targetPosition); // unsigned might be used for relative offsets
-    view.setUint32(11, targetPositionBand);
+    view.setInt32(11, targetPositionBand);
     view.setUint32(15, velocity);
     view.setUint16(19, acceleration);
     view.setUint16(21, pushCurrentLimitingValue);
@@ -572,9 +584,11 @@ const exceptionMap = [
     'Slave Device Failure'
 ];
 
+
 /**
  * DSS1/2 Controller Status Signal Reading 1 (reading two registers DSS1 and DSS2)
  */
+/**
 export const queryDeviceStatusCommand =  queryHoldingRegisters(0x9005, 2);
 
 export function parseDeviceStatusResponse(response: Uint8Array): { dss1: Set<DSS1>, dss2: Set<DSS2> } {
@@ -582,9 +596,10 @@ export function parseDeviceStatusResponse(response: Uint8Array): { dss1: Set<DSS
     const view = new DataView(responseData);
     const dss1 = enumBitSetFromNumber(view.getUint16(0), DSS1) as any as Set<DSS1>
     const dss2 = enumBitSetFromNumber(view.getUint16(2), DSS2) as any as Set<DSS2>;
-    console.info(`Parsed parseDeviceStatusResponse from response: ${response} dss1: ${Array.from(dss1)} (${Array.from(dss1).map(enumNumberToString(DSS1))})  dss2:${Array.from(dss2).map(enumNumberToString(DSS2))}`)
+    //console.info(`Parsed parseDeviceStatusResponse from response: ${response} dss1: ${Array.from(dss1)} (${Array.from(dss1).map(enumNumberToString(DSS1))})  dss2:${Array.from(dss2).map(enumNumberToString(DSS2))}`)
     return {dss1, dss2}
 }
+ **/
 
 /**
  * Queries: TODO: check if shockspot hardware supports this at all
