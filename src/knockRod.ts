@@ -147,13 +147,17 @@ export class KnockRod extends DocumentFragment {
 
     }
 
-    public addEventListener<K extends keyof ThrusterEventHandlersEventMap>(type: K, listener: (this: KnockRod, ev: ThrusterEventHandlersEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void {
-        super.addEventListener(type, listener, options);
+
+    public addEventListener<K extends keyof ThrusterEventHandlersEventMap>(type: K, listener: ((evt: ThrusterEventHandlersEventMap[K]) => any) | EventListenerObject | null, options?: boolean | AddEventListenerOptions): void {
+        super.addEventListener(type as string, listener as (evt: Event)=> any, options);
     }
 
+    /*
     public removeEventListener<K extends keyof ThrusterEventHandlersEventMap>(type: K, listener: (this: KnockRod, ev: ThrusterEventHandlersEventMap[K]) => any, options?: boolean | EventListenerOptions): void {
         super.removeEventListener(type, listener, options)
     }
+    */
+
 
     private writer: WritableStreamDefaultWriter<Uint8Array> | undefined = undefined;
     private reader: ReadableStreamDefaultReader<Uint8Array> | undefined = undefined;
@@ -162,17 +166,22 @@ export class KnockRod extends DocumentFragment {
     private readonly timer = new TaskTimer(100);
     private readonly mutex = new Mutex();
 
+    public async setServo(on: boolean) {
+        console.info("setting servo "+ (on? 'on':'off'));
+        const release = await withTimeout(this.mutex, 100).acquire();
+        try {
+            await this.writeBytes(servoOnCommand(on)); // SON Servo ON/OFF  Servo ON (FF00)
+            console.info("response: " + KnockRod.toHex(await this.readBytes(servoOnCommand(on).byteLength)));
+        } finally {
+            release();
+        }
+    }
+
     public async init(): Promise<void> {
 
         await this.port.open(KnockRod.SERIAL_OPTIONS);
         this.writer = this.port.writable!.getWriter();
         this.reader = this.port.readable!.getReader();
-
-//            .pipeThrough(new TransformStream(new TimestampTransformer(Thruster.silentInterval)))
-
-
-        console.info("port opened");
-        await this.wait(10);
 
         await this.resetAlarm();
 
@@ -180,13 +189,11 @@ export class KnockRod extends DocumentFragment {
         try {
             await this.writeBytes(pioModbusOnCommand); // PMSL PIO/Modbus Switching Setting (Enable Modus commands)
             console.info("response: " + KnockRod.toHex(await this.readBytes(pioModbusOnCommand.byteLength)));
-            await this.wait(20);
-            await this.writeBytes(servoOnCommand(true)); // SON Servo ON/OFF  Servo ON (FF00)
-            console.info("response: " + KnockRod.toHex(await this.readBytes(servoOnCommand(true).byteLength)));
-            await this.wait(20);
         } finally {
             release();
         }
+
+        await this.setServo(true);
 
         //await this.writeBytes(ThrusterProtocol.queryDeviceStatusCommand());
         //await this.wait(10);

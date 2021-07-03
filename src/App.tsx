@@ -1,4 +1,4 @@
-import logo from './logo.svg';
+
 import './App.css';
 import {KnockRod,} from "./knockRod";
 import {DSS1, DSSE} from "./knockRodProtocol";
@@ -38,7 +38,7 @@ function App() {
           </p>
         }
 
-        {rod &&
+        {rod && state &&
         <table>
           <tbody>
           <tr>
@@ -85,7 +85,6 @@ function App() {
         </table>
         }
 
-
         <div>
           <button onClick={go} disabled={!!state} className="App-link"> Start</button>
 
@@ -94,6 +93,7 @@ function App() {
                 <button onClick={() => rod!.moveSimple()}> Move up</button>
                 <button onClick={() => rod!.moveRetract()}> Retract</button>
                 <button onClick={() => rod!.move2()}> Push until hitting workload</button>
+                <button onClick={() => rod!.setServo(!(state?.deviceStatusRegister1.has(DSS1.SV) || false))}> Toggle servo</button>
                 <button onClick={() => rod!.home()}> Home!!</button>
               </div>
           }

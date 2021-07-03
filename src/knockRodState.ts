@@ -6,4 +6,5 @@ export interface KnockRodState {
     deviceStatusRegister2: Set<DSS2>
     expansionDeviceStatus: Set<DSSE>
     currentPosition: number
+
 }
