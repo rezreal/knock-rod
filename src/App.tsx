@@ -6,12 +6,13 @@ import {KnockRodState} from "./knockRodState";
 
 
 function App() {
+  const [params, setParams] = useState<{ maxDepth: number, speed: number}>({maxDepth: 5000, speed: 3000});
   const [state, setState] = useState<KnockRodState | undefined>(undefined);
   const [rod, setRod] = useState<KnockRod | undefined>(undefined);
 
   const onPalmDown = useCallback(() => {
     if (rod && state) {
-      return rod.moveTo(state.currentPosition + 1000);
+      return rod.moveTo(state.currentPosition + 15000);
     }
     return Promise.resolve();
 
@@ -30,6 +31,10 @@ function App() {
     return () => rod?.removeEventListener('palmdown', onPalmDown) && rod?.removeEventListener('palmup', onPalmUp) ;
   }, [rod, onPalmDown, onPalmUp]);
 
+  useEffect(() => {
+    rod?.setParams(params)
+  }, [params, rod]);
+
   async function go() {
 
     const ports = await window.navigator.serial.getPorts();
@@ -44,7 +49,11 @@ function App() {
     console.info("ready for fun")
   }
 
-  function renderMmm(mm:number) {
+  function renderSpeed(speed: number) {
+    return new Intl.NumberFormat('de-DE', { maximumFractionDigits:4  }).format(speed/1000.0) + "cm/s";
+  }
+
+  function renderMmm(mm: number) {
       return new Intl.NumberFormat('de-DE', { maximumFractionDigits:4  }).format(mm/1000.0) + "cm";
   }
 
@@ -63,12 +72,24 @@ function App() {
         <table>
           <tbody>
           <tr>
+            <td>Max depth: {renderMmm(params.maxDepth)}</td>
+            <td><input type="range" value={params.maxDepth} onChange={ (e) => setParams({...params, maxDepth: parseInt(e.target.value)}) } min="100" step="100" max="20000" /></td>
+          </tr>
+          <tr>
+            <td>Speed: {renderSpeed(params.speed)}</td>
+            <td><input type="range" value={params.speed} onChange={ (e) => setParams({...params, speed: parseInt(e.target.value)}) } min="100" step="100" max="40000" /></td>
+          </tr>
+          <tr>
             <td>Operation mode status  (DSSE.PMSS):</td>
             <td>{state.systemStatusRegister.has(STAT.RMDS) ? 'MANU️' : 'AUTO'}</td>
           </tr>
           <tr>
             <td>Modbus enabled (DSSE.PMSS):</td>
             <td>{state.expansionDeviceStatus.has(DSSE.PMSS) ? '✔️' : '❌'}</td>
+          </tr>
+          <tr>
+            <td>Safety speed enabled status (DSS1.SFTY):</td>
+            <td>{state.deviceStatusRegister1.has(DSS1.SFTY) ? '✔️' : '❌'}</td>
           </tr>
           <tr>
             <td>Controller ready status:</td>

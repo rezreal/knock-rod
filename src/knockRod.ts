@@ -9,7 +9,7 @@ import {
 } from "./knockRodProtocol";
 import {Task, TaskTimer} from 'tasktimer';
 import {Mutex, withTimeout} from "async-mutex";
-import {KnockRodState} from "./knockRodState";
+import {KnockRodParams, KnockRodState} from "./knockRodState";
 
 
 export interface ConnectedEvent extends CustomEvent<{}> {
@@ -67,6 +67,8 @@ export class KnockRod extends DocumentFragment {
 
     private _state: KnockRodState | undefined = undefined
 
+    private params: KnockRodParams;
+
 
     public get state(): KnockRodState | undefined {
         return this._state;
@@ -95,8 +97,9 @@ export class KnockRod extends DocumentFragment {
 
 
 
-    constructor(private readonly port: SerialPort, private readonly size: ShockRodSize) {
-        super()
+    constructor(private readonly port: SerialPort, private readonly size: ShockRodSize, params?: KnockRodParams) {
+        super();
+        this.params = params || { maxDepth: size*100, speed: 1000 }
     }
 
     public async resetAlarm(): Promise<void> {
@@ -131,10 +134,10 @@ export class KnockRod extends DocumentFragment {
     public async moveTo(targetPos:number): Promise<void> {
         await this.mutex.runExclusive(async () => {
             await this.writeBytes(numericalValueMovementCommand(
-                targetPos,
+                Math.min(this.params.maxDepth, targetPos),
                 10,//10,
-                2000,
-                20,
+                this.params.speed,
+                30,
                 0,//51, //51,
                 []));
             console.info("response: " + KnockRod.toHex(await this.readBytes(homeReturn[0].byteLength)));
@@ -210,6 +213,10 @@ export class KnockRod extends DocumentFragment {
 
     private readonly timer = new TaskTimer(80);
     private readonly mutex = new Mutex();
+
+    public setParams(params: KnockRodParams) {
+        this.params = {...params}
+    }
 
     public async setServo(on: boolean) {
         console.info("setting servo " + (on ? 'on' : 'off'));
