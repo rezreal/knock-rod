@@ -11,9 +11,7 @@ import {
   pioModbusOnCommand,
   positionCommand,
   positionVelocityAndAccelerationCommand,
-  queryDeviceMovementHistory,
-  queryDeviceStatusCommand,
-  queryStatusRegister,
+  queryDeviceMovementHistory, queryStatusRegisters,
   resetAlarm,
   servoOnCommand,
 } from "./knockRodProtocol";
@@ -48,7 +46,7 @@ describe('TrusterProtocol', () => {
   });
 
   it('queryStatusRegisterRtu works according to spec', () => {
-    expect(buf2hex(queryStatusRegister())).toEqual("01039000000AE8CD");
+    expect(buf2hex(queryStatusRegisters)).toEqual("01039000000AE8CD");
   });
 
   it('homeReturn works according to spec', () => {
@@ -67,10 +65,6 @@ describe('TrusterProtocol', () => {
 
   it('servoOnCommand works according to spec', () => {
     expect(buf2hex(servoOnCommand(true))).toEqual("01050403FF007D0A");
-  });
-
-  it('queryDeviceStatusCommand works according to spec', () => {
-    expect(buf2hex(queryDeviceStatusCommand)).toEqual("010390050002F90A");
   });
 
   it('queryDeviceMovementHistory works according to spec', () => {
