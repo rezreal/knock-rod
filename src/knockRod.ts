@@ -5,7 +5,7 @@ import {
     numericalValueMovementCommand, parseQueryStatusRegisterResponse,
     pioModbusOnCommand, queryStatusRegisters,
     resetAlarm,
-    servoOnCommand
+    servoOnCommand, setSafetySpeedEnabled
 } from "./knockRodProtocol";
 import {Task, TaskTimer} from 'tasktimer';
 import {Mutex, withTimeout} from "async-mutex";
@@ -100,6 +100,16 @@ export class KnockRod extends DocumentFragment {
     constructor(private readonly port: SerialPort, private readonly size: ShockRodSize, params?: KnockRodParams) {
         super();
         this.params = params || { maxDepth: size*100, speed: 1000 }
+    }
+
+    public async setSafetySpeed(enabled: boolean): Promise<void> {
+        const release = await withTimeout(this.mutex, 100).acquire();
+        try {
+            await this.writeBytes(setSafetySpeedEnabled(enabled)); // ALRS Alarm reset command
+            console.info("response: " + KnockRod.toHex(await this.readBytes(setSafetySpeedEnabled(enabled).byteLength)));
+        } finally {
+            release();
+        }
     }
 
     public async resetAlarm(): Promise<void> {

@@ -451,6 +451,10 @@ function buildResetAlarm(reset: boolean) {
     return forceSingleCoil(0x0407, reset ? 0xFF00 : 0x00);
 }
 
+export function setSafetySpeedEnabled(enabled: boolean) {
+    return forceSingleCoil(0x0401, enabled ? 0xFF00 : 0x00);
+}
+
 /**
  * ALRS
  * When the alarm reset edge is turned on (the data is first set to FF00 and then changed to 0000),

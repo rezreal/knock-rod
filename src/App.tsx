@@ -4,26 +4,56 @@ import {DSS1, DSSE, STAT} from "./knockRodProtocol";
 import {useCallback, useEffect, useState} from "react";
 import {KnockRodState} from "./knockRodState";
 
+function getSessionStorageOrDefault<T>(key:any, defaultValue: T): T {
+  const stored = sessionStorage.getItem(key);
+  if (!stored) {
+    return defaultValue;
+  }
+  return JSON.parse(stored) as T;
+}
+
 
 function App() {
-  const [params, setParams] = useState<{ maxDepth: number, speed: number}>({maxDepth: 5000, speed: 3000});
+
+  const [params, setParams] = useState<{
+    minDepth: number,
+    maxDepth: number,
+    speed: number,
+    showStats: boolean,
+    program: 'palm' | 'pi' | undefined
+  }>(getSessionStorageOrDefault('params',{minDepth: 100, maxDepth: 5000, speed: 3000, showStats: false, program: undefined}));
+
+
+  useEffect(() => {
+    sessionStorage.setItem('params', JSON.stringify(params));
+  }, [params]);
+
+  useEffect(() => {
+    if (params.program === 'pi') {
+      // TODO: continue
+
+    }
+  }, [params]);
+
+
   const [state, setState] = useState<KnockRodState | undefined>(undefined);
   const [rod, setRod] = useState<KnockRod | undefined>(undefined);
 
   const onPalmDown = useCallback(() => {
-    if (rod && state) {
-      return rod.moveTo(state.currentPosition + 15000);
+    if (rod && state && params.program === 'palm') {
+      return rod.moveTo(Math.min(params.maxDepth, state.currentPosition + 15000));
     }
     return Promise.resolve();
 
-  }, [rod, state]);
+  }, [rod, state, params]);
 
   const onPalmUp = useCallback(() => {
-    if (rod) {
-      return rod.moveTo(1000);
+    if (rod && params.program === 'palm') {
+      return rod.moveTo(params.minDepth);
     }
     return Promise.resolve();
-  }, [rod]);
+  }, [rod, params]);
+
 
   useEffect(() => {
     rod?.addEventListener('palmdown', onPalmDown);
@@ -68,17 +98,11 @@ function App() {
           </p>
         }
 
-        {rod && state &&
+
+        {rod && state && params.showStats &&
         <table>
           <tbody>
-          <tr>
-            <td>Max depth: {renderMmm(params.maxDepth)}</td>
-            <td><input type="range" value={params.maxDepth} onChange={ (e) => setParams({...params, maxDepth: parseInt(e.target.value)}) } min="100" step="100" max="20000" /></td>
-          </tr>
-          <tr>
-            <td>Speed: {renderSpeed(params.speed)}</td>
-            <td><input type="range" value={params.speed} onChange={ (e) => setParams({...params, speed: parseInt(e.target.value)}) } min="100" step="100" max="40000" /></td>
-          </tr>
+
           <tr>
             <td>Operation mode status  (DSSE.PMSS):</td>
             <td>{state.systemStatusRegister.has(STAT.RMDS) ? 'MANU️' : 'AUTO'}</td>
@@ -89,7 +113,7 @@ function App() {
           </tr>
           <tr>
             <td>Safety speed enabled status (DSS1.SFTY):</td>
-            <td>{state.deviceStatusRegister1.has(DSS1.SFTY) ? '✔️' : '❌'}</td>
+            <td><input type="checkbox" checked={state.deviceStatusRegister1.has(DSS1.SFTY)} onChange={ (e) => rod?.setSafetySpeed(e.target.checked) }/>{state.deviceStatusRegister1.has(DSS1.SFTY) ? '✔️' : '❌'}</td>
           </tr>
           <tr>
             <td>Controller ready status:</td>
@@ -119,10 +143,7 @@ function App() {
             <td>Input Value:</td>
             <td>{state.input}</td>
           </tr>
-          <tr>
-            <td>Current Position:</td>
-            <td>{renderMmm(state.currentPosition)}</td>
-          </tr>
+
           <tr>
             <td>Moving signal (DSSE.MOVE):</td>
             <td>{state.expansionDeviceStatus.has(DSSE.MOVE) ? '🟢️' : '⚪'}</td>
@@ -139,22 +160,66 @@ function App() {
             <td>Homing Ended:</td>
             <td>{state.deviceStatusRegister1.has(DSS1.HEND) ? '✔️' : '❌'}</td>
           </tr>
+          </tbody>
+        </table>
+        }
 
+        {rod && state &&
+        <table>
+          <tbody>
+          <tr>
+            <td>Speed: {renderSpeed(params.speed)}</td>
+            <td><input type="range" value={params.speed}
+                       onChange={(e) => setParams({...params, speed: parseInt(e.target.value)})} min="100" step="100"
+                       max="40000"/></td>
+          </tr>
+          <tr>
+            <td>Min depth: {renderMmm(params.minDepth)}</td>
+            <td><input type="range" value={params.minDepth}
+                       onChange={(e) => setParams({...params, minDepth: Math.min(parseInt(e.target.value), params.maxDepth)})} min="100" step="100"
+                       max="20000"/></td>
+          </tr>
+          <tr>
+            <td>Max depth: {renderMmm(params.maxDepth)}</td>
+            <td><input type="range" value={params.maxDepth}
+                       onChange={(e) => setParams({...params, maxDepth: Math.max(parseInt(e.target.value), params.minDepth)})} min="100" step="100"
+                       max="20000"/></td>
+          </tr>
+          <tr>
+            <td>Current Position:</td>
+            <td>{renderMmm(state.currentPosition)}<br/>
+              <input type="range" value={state.currentPosition} disabled={true} min="0" max="20000"/></td>
+          </tr>
           </tbody>
         </table>
         }
 
         <div>
-          <button onClick={go} disabled={!!state} className="App-link"> Start</button>
+          { !state &&
+            <button onClick={go} className="App-link"> Start</button>
+          }
 
           {state && rod && <div>
-                <button onClick={() => rod!.resetAlarm()} disabled={!state} > Reset Alarm</button>
-                <button onClick={() => rod!.moveSimple()}> Move up</button>
-                <button onClick={() => rod!.moveRetract()}> Retract</button>
-                <button onClick={() => rod!.move2()}> Push until hitting workload</button>
-                <button onClick={() => rod!.setServo(!(state?.deviceStatusRegister1.has(DSS1.SV) || false))}> Toggle servo</button>
-                <button onClick={() => rod!.home()}> Home!!</button>
-              </div>
+
+            <button onClick={() => setParams({...params, showStats: !params.showStats})}
+                    title={"Settings"}>{params.showStats ? 'show less' : 'show more'}</button>
+
+            <button onClick={() => rod!.resetAlarm()} disabled={!state}> Reset Alarm</button>
+            <button onClick={() => rod!.moveSimple()}> Move up</button>
+            <button onClick={() => rod!.moveRetract()}> Retract</button>
+            <button onClick={() => rod!.move2()}> Push until hitting workload</button>
+            <button onClick={() => rod!.setServo(!(state?.deviceStatusRegister1.has(DSS1.SV) || false))}> Toggle servo</button>
+            <button onClick={() => rod!.home()}> Home!!</button>
+
+            <br />
+            <label htmlFor={'program'}>Program: </label>
+
+            <select id="program" name="program" value={params.program} onChange={(e) => setParams({...params, program: e.currentTarget.value as any})} defaultValue={undefined}>
+              <option value={undefined}> -- select an option -- </option>
+              <option value="palm">Palm control</option>
+            </select>
+
+          </div>
           }
 
         </div>
