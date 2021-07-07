@@ -1,0 +1,20 @@
+{
+  "files": {
+    "main.css": "https://rezreal.github.io/knock-rod/static/css/main.9d5b29c0.chunk.css",
+    "main.js": "https://rezreal.github.io/knock-rod/static/js/main.32ea4518.chunk.js",
+    "main.js.map": "https://rezreal.github.io/knock-rod/static/js/main.32ea4518.chunk.js.map",
+    "runtime-main.js": "https://rezreal.github.io/knock-rod/static/js/runtime-main.da87ec1f.js",
+    "runtime-main.js.map": "https://rezreal.github.io/knock-rod/static/js/runtime-main.da87ec1f.js.map",
+    "static/js/2.a7ea7a48.chunk.js": "https://rezreal.github.io/knock-rod/static/js/2.a7ea7a48.chunk.js",
+    "static/js/2.a7ea7a48.chunk.js.map": "https://rezreal.github.io/knock-rod/static/js/2.a7ea7a48.chunk.js.map",
+    "index.html": "https://rezreal.github.io/knock-rod/index.html",
+    "static/css/main.9d5b29c0.chunk.css.map": "https://rezreal.github.io/knock-rod/static/css/main.9d5b29c0.chunk.css.map",
+    "static/js/2.a7ea7a48.chunk.js.LICENSE.txt": "https://rezreal.github.io/knock-rod/static/js/2.a7ea7a48.chunk.js.LICENSE.txt"
+  },
+  "entrypoints": [
+    "static/js/runtime-main.da87ec1f.js",
+    "static/js/2.a7ea7a48.chunk.js",
+    "static/css/main.9d5b29c0.chunk.css",
+    "static/js/main.32ea4518.chunk.js"
+  ]
+}
