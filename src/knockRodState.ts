@@ -11,8 +11,6 @@ export interface KnockRodState {
 
 
 export interface KnockRodParams {
-    /** The maximum allowed depth to travel for the rod. Unit mm/100 */
-    maxDepth: number
-
+    acceleration: number
     speed: number
 }

@@ -1,5 +1,4 @@
 import {
-    CTLF,
     DSS1,
     homeReturn,
     numericalValueMovementCommand, parseQueryStatusRegisterResponse,
@@ -9,7 +8,8 @@ import {
 } from "./knockRodProtocol";
 import {Task, TaskTimer} from 'tasktimer';
 import {Mutex, withTimeout} from "async-mutex";
-import {KnockRodParams, KnockRodState} from "./knockRodState";
+import {KnockRodState} from "./knockRodState";
+import {clamp, range} from "./interpol";
 
 
 export interface ConnectedEvent extends CustomEvent<{}> {
@@ -51,6 +51,15 @@ interface ThrusterEventHandlersEventMap {
     "palmup": PalmUpButtonEvent;
 }
 
+interface Trace {
+    readonly time: number;
+    readonly pos: number;
+    readonly dest?: {
+        readonly pos: number
+        readonly time: number;
+    }
+}
+
 export class KnockRod extends DocumentFragment {
 
     /**
@@ -67,11 +76,71 @@ export class KnockRod extends DocumentFragment {
 
     private _state: KnockRodState | undefined = undefined
 
-    private params: KnockRodParams;
+    private oscillator = {min: 0, max: 1, speed: 0, out: false, active: false, acceleration: 30}
+    private oscillatorTimer?: number  = undefined;
+
+
+    private onOscillate = async () => {
+        console.info("onOscillate", this.oscillator)
+        const maxSpeed = 40000;
+        const effectiveSpeed = this.oscillator.speed * maxSpeed
+        if (this.oscillator.active) {
+
+            const duration = ((this.oscillator.max - this.oscillator.min) * this.size * 1000) / (effectiveSpeed) * 100;
+            console.info('travel duration:' + duration)
+            window.clearTimeout(this.oscillatorTimer)
+            this.oscillatorTimer = window.setTimeout(this.onOscillate.bind(this), duration+10);
+
+        } else if (this.oscillatorTimer) {
+            window.clearTimeout(this.oscillatorTimer)
+            return;
+        }
+
+        const targetPosition = (this.oscillator.out ? this.oscillator.min : this.oscillator.max) * this.size * 100;
+
+        await this.moveTo(targetPosition, effectiveSpeed, this.oscillator.acceleration)
+
+        this.oscillator = {...this.oscillator, out: !this.oscillator.out}
+    }
+
+    /**
+     *
+     * @param speed 0..1
+     * @param lower 0..1
+     * @param upper 0..1 > lower
+     */
+    public async oscillate(speed: number, lower: number, upper:number, acceleration: number) {
+        const alreadyActive = this.oscillator.active && this.oscillatorTimer;
+        const speedChange = speed !== this.oscillator.speed
+        this.oscillator = {...this.oscillator, min: lower, max: upper, speed, active: speed > 0, acceleration}
+        if (!alreadyActive || speedChange) {
+            return await this.onOscillate();
+        }
+    }
 
 
     public get state(): KnockRodState | undefined {
         return this._state;
+    }
+
+    private trace: Trace = {
+        time: performance.now(),
+        pos: 0,
+        dest: undefined
+    }
+
+    /**
+     * Returns the position where the rod is expected to be currently.
+     */
+    public getEstimatedPosition(): number {
+        if (!this.trace.dest) {
+            return this.trace.pos
+        }
+        const now = performance.now()
+        if (now > this.trace.dest.time) {
+            return this.trace.dest.pos;
+        }
+        return range(this.trace.time, this.trace.pos, this.trace.dest.time, this.trace.dest.pos, now)
     }
 
     private updateState(updater: (old: KnockRodState) => KnockRodState) {
@@ -97,9 +166,8 @@ export class KnockRod extends DocumentFragment {
 
 
 
-    constructor(private readonly port: SerialPort, private readonly size: ShockRodSize, params?: KnockRodParams) {
+    constructor(private readonly port: SerialPort, public readonly size: ShockRodSize) {
         super();
-        this.params = params || { maxDepth: size*100, speed: 1000 }
     }
 
     public async setSafetySpeed(enabled: boolean): Promise<void> {
@@ -141,13 +209,48 @@ export class KnockRod extends DocumentFragment {
         return Promise.resolve();
     }
 
-    public async moveTo(targetPos:number): Promise<void> {
+
+    /**
+     *
+     * @param targetPosRel 0..1
+     * @param duration milliseconds
+     * @param acceleration 1-100
+     */
+    public async moveToWithin(targetPosRel: number, duration: number, acceleration: number): Promise<void> {
+
+        if (this.oscillator.active) {
+            this.oscillator = {...this.oscillator, active:  false}
+            window.clearTimeout(this.oscillatorTimer)
+        }
+        const currentPos = this.getEstimatedPosition();
+        const targetPos = targetPosRel * this.size * 100
+
+        const distance = Math.abs(currentPos - targetPos);
+        const speed = distance / (Math.max(1,duration)) * 1000
+        if (speed === 0) {
+            return;
+        }
+
+        return await this.moveTo(targetPos, speed, acceleration);
+    }
+
+    public async moveTo(targetPos:number, speed:number, acceleration: number): Promise<void> {
+        const clampedSpeed = clamp(speed,1, 50000)
+        const clampedTargetPos = clamp(targetPos,0, this.size * 100)
+
+
         await this.mutex.runExclusive(async () => {
+            const distanceToDest = Math.abs(this.trace.pos - targetPos)
+            const durationToDest = distanceToDest / speed
+            const pos = this.getEstimatedPosition()
+            const time = performance.now()
+            const targetTime = durationToDest + time
+            this.trace = { time, pos, dest: { pos: targetPos, time: targetTime } }
             await this.writeBytes(numericalValueMovementCommand(
-                Math.min(this.params.maxDepth, targetPos),
+                clampedTargetPos,
                 10,//10,
-                this.params.speed,
-                30,
+                clampedSpeed,
+                acceleration,
                 0,//51, //51,
                 []));
             console.info("response: " + KnockRod.toHex(await this.readBytes(homeReturn[0].byteLength)));
@@ -155,30 +258,10 @@ export class KnockRod extends DocumentFragment {
     }
 
     public async moveSimple(): Promise<void> {
-        await this.mutex.runExclusive(async () => {
-            await this.writeBytes(numericalValueMovementCommand(
-                20000,
-                10,//10,
-                30000,
-                20,
-                0,//51, //51,
-                []));
-            console.info("response: " + KnockRod.toHex(await this.readBytes(homeReturn[0].byteLength)));
-        })
+        return this.moveTo(20000, 30000, 30);
     }
 
-    public async move2(): Promise<void> {
-        await this.mutex.runExclusive(async () => {
-            await this.writeBytes(numericalValueMovementCommand(
-                150,
-                -15000,//10,
-                5000,
-                20,
-                35,//51, //51,
-                [CTLF.PUSH]));
-            console.info("response: " + KnockRod.toHex(await this.readBytes(homeReturn[0].byteLength)));
-        })
-    }
+
 
     /**
      * Homing may take up to 10 seconds
@@ -199,6 +282,7 @@ export class KnockRod extends DocumentFragment {
         // wait for up to 12 seconds for homing to become complete
         try {
             await this.waitUntil(12000, () => this.state?.deviceStatusRegister1.has(DSS1.HEND) || false);
+            this.trace = {pos: 0, time: performance.now()}
         } catch (e) {
             throw new Error("Homing was not successful, waited for 12 seconds");
         }
@@ -216,17 +300,12 @@ export class KnockRod extends DocumentFragment {
     }
     */
 
-
     private writer: WritableStreamDefaultWriter<Uint8Array> | undefined = undefined;
     private reader: ReadableStreamDefaultReader<Uint8Array> | undefined = undefined;
 
 
     private readonly timer = new TaskTimer(80);
     private readonly mutex = new Mutex();
-
-    public setParams(params: KnockRodParams) {
-        this.params = {...params}
-    }
 
     public async setServo(on: boolean) {
         console.info("setting servo " + (on ? 'on' : 'off'));
