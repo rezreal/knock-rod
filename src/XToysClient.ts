@@ -6,9 +6,6 @@ export interface XToysConfig {
   readonly token: string;
 }
 
-
-const XToysConfirmConnect =  { 'success': true }
-
 export type XToysCommandUnion = SpeedMessage | PositionMessage
 
 /**
@@ -36,9 +33,6 @@ export interface PositionMessage extends XToysCommand {
   /** the position the toy should move to (integer in the range 0-100) */
   position: number
 }
-
-const example: SpeedMessage = {"mode": "speed", "speed": 50, "upper": 100, "lower": 0}
-const exampleP: PositionMessage = {"mode": "position", "duration": 130, "position": 90}
 
 
 export class XToysClient {
