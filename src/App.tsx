@@ -270,7 +270,7 @@ const App: FC<Props> = (_props: Props) => {
                     {!state && !rodConnecting &&
 
                         <>
-                            <select onSelect={(e) => setSize(Number.parseInt(e.currentTarget.value)) } value={size}>
+                            <select onChange={(e) => setSize(Number.parseInt(e.target.value)) } value={size}>
                                 <option value={ShockRodSize.EightInch} >8 inch (20cm)</option>
                                 <option value={ShockRodSize.TwelveInch}>12 inch (30cm)</option>
                             </select>
