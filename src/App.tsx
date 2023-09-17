@@ -49,6 +49,7 @@ const App: FC<Props> = (_props: Props) => {
     }, [config]);
 
 
+    const [size, setSize] = useState(ShockRodSize.EightInch)
     const [state, setState] = useState<KnockRodState | undefined>(undefined);
     const rod = useRef<KnockRod | undefined>(undefined);
 
@@ -78,7 +79,7 @@ const App: FC<Props> = (_props: Props) => {
         }
 
         setConfig(c => ({...c, serialDevice: port.getInfo() as UsbDeviceIdentifier}))
-        let t = new KnockRod(port, ShockRodSize.EightInch);
+        let t = new KnockRod(port, size);
         t.addEventListener('stateChange', (e) => setState(e.detail.state))
 
         setRodConnecting(true);
@@ -267,7 +268,14 @@ const App: FC<Props> = (_props: Props) => {
 
                 <div>
                     {!state && !rodConnecting &&
+
+                        <>
+                            <select onSelect={(e) => setSize(Number.parseInt(e.currentTarget.value)) } value={size}>
+                                <option value={ShockRodSize.EightInch} >8 inch (20cm)</option>
+                                <option value={ShockRodSize.TwelveInch}>12 inch (30cm)</option>
+                            </select>
                         <button onClick={go} className="App-link"> Start</button>
+                        </>
                     }
 
                     {rodConnecting &&
